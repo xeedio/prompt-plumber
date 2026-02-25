@@ -12,7 +12,8 @@
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "opencode",
@@ -22,6 +23,7 @@
   ],
   "author": "",
   "dependencies": {
+    "@xeedio/prompt-plumber": "^0.1.0",
     "jsonc-parser": "^3.3.1"
   },
   "peerDependencies": {
@@ -31,6 +33,7 @@
     "@opencode-ai/plugin": "^1.1.49",
     "@opencode-ai/sdk": "^1.1.48",
     "@types/node": "^22.13.14",
+    "@vitest/coverage-v8": "^3.2.4",
     "typescript": "^5.8.2",
     "vitest": "^3.2.4"
   }
