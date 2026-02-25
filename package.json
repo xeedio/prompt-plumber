@@ -1,0 +1,37 @@
+{
+  "name": "@xeedio/prompt-plumber",
+  "version": "0.1.0",
+  "description": "OpenCode plugin to adapt vLLM/Qwen3 message handling.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "vllm",
+    "qwen3"
+  ],
+  "author": "",
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=0.13.7"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.1.49",
+    "@opencode-ai/sdk": "^1.1.48",
+    "@types/node": "^22.13.14",
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.4"
+  }
+}
