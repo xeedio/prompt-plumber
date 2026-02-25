@@ -20,4 +20,9 @@ describe("mergeSystemMessages", () => {
       "first\n\nsecond\n\nthird",
     ]);
   });
+
+  it("drops non-string entries after normalization", () => {
+    const mixed = ["first", null, "second"] as unknown as string[];
+    expect(mergeSystemMessages(mixed)).toEqual(["first\n\nsecond"]);
+  });
 });

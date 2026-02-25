@@ -63,4 +63,14 @@ describe("stripAssistantHistoryThinking", () => {
     const result = stripAssistantHistoryThinking(messages, "none");
     expect(result[0].parts).toEqual([]);
   });
+
+  it("handles last-message retention when there are no assistant messages", () => {
+    const messages: ChatMessage[] = [
+      { info: { role: "user" }, parts: [{ type: "thinking", text: "u" }] },
+      { info: { role: "system" }, parts: [{ type: "reasoning", text: "s" }] },
+    ];
+
+    const result = stripAssistantHistoryThinking(messages, "last-message");
+    expect(result).toEqual(messages);
+  });
 });

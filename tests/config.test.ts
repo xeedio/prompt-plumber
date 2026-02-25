@@ -1,7 +1,12 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_CONFIG,
+  loadAdapterConfig,
   mergeConfig,
   normalizeRule,
   type AdapterDefaults,
@@ -39,6 +44,20 @@ describe("config defaults and normalization", () => {
     expect(normalized.merge_system_messages).toBe(true);
   });
 
+  it("normalizes non-array providers/model_patterns to empty arrays", () => {
+    const normalized = normalizeRule(
+      {
+        name: "non-arrays",
+        providers: "vllm" as unknown as string[],
+        model_patterns: "qwen3" as unknown as string[],
+      },
+      defaults,
+    );
+
+    expect(normalized.providers).toEqual([]);
+    expect(normalized.model_patterns).toEqual([]);
+  });
+
   it("merges partial overrides and applies normalized rule defaults", () => {
     const override: PartialAdapterConfig = {
       enabled: false,
@@ -66,6 +85,126 @@ describe("config defaults and normalization", () => {
       model_patterns: ["qwen3-coder"],
       strip_history_thinking: false,
       reasoning_retention: "last-message",
+    });
+  });
+});
+
+describe("loadAdapterConfig", () => {
+  async function withTempHome<T>(
+    callback: (paths: { homeDir: string; projectDir: string }) => Promise<T>,
+  ): Promise<T> {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "pp-home-"));
+    const projectDir = await mkdtemp(path.join(os.tmpdir(), "pp-project-"));
+    const previousHome = process.env.HOME;
+    process.env.HOME = homeDir;
+
+    try {
+      return await callback({ homeDir, projectDir });
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      await rm(homeDir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  }
+
+  it("returns defaults when no global/project config files exist", async () => {
+    await withTempHome(async ({ projectDir }) => {
+      const loaded = await loadAdapterConfig(projectDir);
+      expect(loaded).toEqual(DEFAULT_CONFIG);
+    });
+  });
+
+  it("loads only global config when project directory is omitted", async () => {
+    await withTempHome(async ({ homeDir }) => {
+      const globalDir = path.join(homeDir, ".config", "opencode");
+      await mkdir(globalDir, { recursive: true });
+      await writeFile(
+        path.join(globalDir, "vllm-adapter.jsonc"),
+        `{
+          "enabled": false
+        }`,
+      );
+
+      const loaded = await loadAdapterConfig();
+      expect(loaded.enabled).toBe(false);
+      expect(loaded.defaults).toEqual(DEFAULT_CONFIG.defaults);
+    });
+  });
+
+  it("merges global config first and then project overrides", async () => {
+    await withTempHome(async ({ homeDir, projectDir }) => {
+      const globalDir = path.join(homeDir, ".config", "opencode");
+      await mkdir(globalDir, { recursive: true });
+      await writeFile(
+        path.join(globalDir, "vllm-adapter.jsonc"),
+        `{
+          "defaults": {
+            "strip_history_thinking": false,
+            "reasoning_retention": "last-message"
+          },
+          "rules": [
+            {
+              "name": "global",
+              "providers": ["vllm"],
+              "model_patterns": ["qwen3"]
+            }
+          ]
+        }`,
+      );
+
+      const projectConfigDir = path.join(projectDir, ".opencode");
+      await mkdir(projectConfigDir, { recursive: true });
+      await writeFile(
+        path.join(projectConfigDir, "vllm-adapter.jsonc"),
+        `{
+          "enabled": false,
+          "defaults": {
+            "reasoning_retention": "all"
+          },
+          "rules": [
+            {
+              "name": "project",
+              "providers": ["vllm"],
+              "model_patterns": ["qwen3-coder"],
+              "merge_system_messages": false
+            }
+          ]
+        }`,
+      );
+
+      const loaded = await loadAdapterConfig(projectDir);
+      expect(loaded.enabled).toBe(false);
+      expect(loaded.defaults.strip_history_thinking).toBe(false);
+      expect(loaded.defaults.reasoning_retention).toBe("all");
+      expect(loaded.rules).toEqual([
+        {
+          name: "project",
+          providers: ["vllm"],
+          model_patterns: ["qwen3-coder"],
+          merge_system_messages: false,
+          strip_history_thinking: false,
+          strip_stored_thinking_text: true,
+          reasoning_retention: "all",
+        },
+      ]);
+    });
+  });
+
+  it("throws a parse error when config JSONC is invalid", async () => {
+    await withTempHome(async ({ homeDir, projectDir }) => {
+      const globalDir = path.join(homeDir, ".config", "opencode");
+      await mkdir(globalDir, { recursive: true });
+      const brokenPath = path.join(globalDir, "vllm-adapter.jsonc");
+      await writeFile(brokenPath, "{\n  defaults: {\n");
+
+      await expect(loadAdapterConfig(projectDir)).rejects.toThrow(
+        `Failed to parse JSONC config ${brokenPath}`,
+      );
     });
   });
 });

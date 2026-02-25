@@ -97,4 +97,81 @@ describe("ParamsCache", () => {
     expect(decision.active).toBe(true);
     expect(decision.matchedRule).toBe("primary");
   });
+
+  it("returns inactive when provider/model are missing", () => {
+    const cache = new ParamsCache(baseConfig);
+    const decision = cache.rememberFromChatParams({ sessionID: "s6" });
+
+    expect(decision).toMatchObject({
+      active: false,
+      provider: "",
+      model: "",
+    });
+    expect(decision.matchedRule).toBeUndefined();
+  });
+
+  it("returns inactive when configuration is disabled", () => {
+    const cache = new ParamsCache({
+      ...baseConfig,
+      enabled: false,
+    });
+
+    const decision = cache.rememberFromChatParams({
+      sessionID: "s7",
+      provider: "vllm",
+      model: "qwen3-coder-next",
+    });
+
+    expect(decision.active).toBe(false);
+    expect(decision.matchedRule).toBeUndefined();
+  });
+
+  it("treats invalid regex patterns as non-matches", () => {
+    const cache = new ParamsCache({
+      ...baseConfig,
+      rules: [
+        {
+          name: "broken-pattern",
+          providers: ["vllm"],
+          model_patterns: ["(["],
+          merge_system_messages: true,
+          strip_history_thinking: true,
+          strip_stored_thinking_text: true,
+          reasoning_retention: "none",
+        },
+      ],
+    });
+
+    const decision = cache.rememberFromChatParams({
+      sessionID: "s8",
+      provider: "vllm",
+      model: "qwen3-coder-next",
+    });
+
+    expect(decision.active).toBe(false);
+    expect(decision.matchedRule).toBeUndefined();
+  });
+
+  it("evaluates from resolve() provider/model input when session is not cached", () => {
+    const cache = new ParamsCache(baseConfig);
+    const decision = cache.resolve({
+      provider: "vllm",
+      model: "qwen3-coder-next",
+    });
+
+    expect(decision.active).toBe(true);
+    expect(decision.matchedRule).toBe("primary");
+    expect(cache.resolve({}).matchedRule).toBe("primary");
+  });
+
+  it("returns inactive when resolve() has no prior decision", () => {
+    const cache = new ParamsCache(baseConfig);
+    const decision = cache.resolve({});
+
+    expect(decision).toMatchObject({
+      active: false,
+      provider: "",
+      model: "",
+    });
+  });
 });
