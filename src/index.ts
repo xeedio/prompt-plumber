@@ -66,6 +66,13 @@ const plugin = (async (ctx) => {
 
       output.text = stripThinkingText(output.text);
     },
+
+    "chat.headers": async (input, output) => {
+      if (input.sessionID) {
+        output.headers["x-litellm-session-id"] = input.sessionID;
+        output.headers["x-opencode-session"] = input.sessionID;
+      }
+    },
   };
 }) satisfies Plugin;
 

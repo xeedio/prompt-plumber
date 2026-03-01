@@ -51,6 +51,68 @@ describe("plugin hooks", () => {
     expect(loadAdapterConfigMock).toHaveBeenCalledWith("/tmp/project");
   });
 
+  it("sets session affinity chat headers for vllm and anthropic", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project" } as never)) as Record<
+      string,
+      (input: any, output: any) => Promise<void>
+    >;
+
+    const vllmOutput = { headers: {} as Record<string, string> };
+    await hooks["chat.headers"](
+      {
+        sessionID: "s-vllm",
+        provider: { info: { id: "vllm" } },
+      } as never,
+      vllmOutput,
+    );
+    expect(vllmOutput.headers).toEqual({
+      "x-litellm-session-id": "s-vllm",
+      "x-opencode-session": "s-vllm",
+    });
+
+    const anthropicOutput = { headers: {} as Record<string, string> };
+    await hooks["chat.headers"](
+      {
+        sessionID: "s-anthropic",
+        provider: { info: { id: "anthropic" } },
+      } as never,
+      anthropicOutput,
+    );
+    expect(anthropicOutput.headers).toEqual({
+      "x-litellm-session-id": "s-anthropic",
+      "x-opencode-session": "s-anthropic",
+    });
+  });
+
+  it("does not set session affinity chat headers without sessionID", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project" } as never)) as Record<
+      string,
+      (input: any, output: any) => Promise<void>
+    >;
+
+    const emptySessionOutput = { headers: {} as Record<string, string> };
+    await hooks["chat.headers"](
+      {
+        sessionID: "",
+      } as never,
+      emptySessionOutput,
+    );
+    expect(emptySessionOutput.headers).toEqual({});
+
+    const undefinedSessionOutput = { headers: {} as Record<string, string> };
+    await hooks["chat.headers"](
+      {
+        sessionID: undefined,
+      } as never,
+      undefinedSessionOutput,
+    );
+    expect(undefinedSessionOutput.headers).toEqual({});
+  });
+
   it("wires all hooks and mutates outputs only for active vllm sessions", async () => {
     loadAdapterConfigMock.mockResolvedValue(activeConfig);
     const pluginFactory = (await import("../src/index.js")).default;
