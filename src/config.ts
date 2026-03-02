@@ -11,6 +11,7 @@ export interface AdapterDefaults {
   strip_history_thinking: boolean;
   strip_stored_thinking_text: boolean;
   reasoning_retention: ReasoningRetention;
+  system_inject: string[];
 }
 
 export interface ActivationRule {
@@ -21,6 +22,7 @@ export interface ActivationRule {
   strip_history_thinking: boolean;
   strip_stored_thinking_text: boolean;
   reasoning_retention: ReasoningRetention;
+  system_inject: string[];
 }
 
 export interface AdapterConfig {
@@ -43,6 +45,7 @@ export const DEFAULT_CONFIG: AdapterConfig = {
     strip_history_thinking: true,
     strip_stored_thinking_text: true,
     reasoning_retention: "none",
+    system_inject: [],
   },
   rules: [
     {
@@ -53,6 +56,7 @@ export const DEFAULT_CONFIG: AdapterConfig = {
       strip_history_thinking: true,
       strip_stored_thinking_text: true,
       reasoning_retention: "none",
+      system_inject: [],
     },
   ],
 };
@@ -64,7 +68,23 @@ export function asReasoningRetention(value: unknown, fallback: ReasoningRetentio
   return fallback;
 }
 
+function normalizeStringArray(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
 export function normalizeRule(rule: Partial<ActivationRule>, defaults: AdapterDefaults): ActivationRule {
+  const systemInject = normalizeStringArray(
+    (rule as Partial<ActivationRule> & { system_inject?: unknown }).system_inject,
+  );
+
   return {
     name: rule.name ?? "unnamed-rule",
     providers: Array.isArray(rule.providers)
@@ -78,10 +98,15 @@ export function normalizeRule(rule: Partial<ActivationRule>, defaults: AdapterDe
     strip_stored_thinking_text:
       rule.strip_stored_thinking_text ?? defaults.strip_stored_thinking_text,
     reasoning_retention: asReasoningRetention(rule.reasoning_retention, defaults.reasoning_retention),
+    system_inject: systemInject,
   };
 }
 
 export function mergeConfig(base: AdapterConfig, override: PartialAdapterConfig): AdapterConfig {
+  const hasSystemInjectOverride =
+    override.defaults !== undefined &&
+    Object.prototype.hasOwnProperty.call(override.defaults, "system_inject");
+
   const defaults: AdapterDefaults = {
     ...base.defaults,
     ...(override.defaults ?? {}),
@@ -89,6 +114,12 @@ export function mergeConfig(base: AdapterConfig, override: PartialAdapterConfig)
       override.defaults?.reasoning_retention,
       base.defaults.reasoning_retention,
     ),
+    system_inject: hasSystemInjectOverride
+      ? normalizeStringArray(
+          (override.defaults as Partial<AdapterDefaults> & { system_inject?: unknown })
+            .system_inject,
+        )
+      : normalizeStringArray(base.defaults.system_inject),
   };
 
   const rawRules = Array.isArray(override.rules) ? override.rules : base.rules;
@@ -157,6 +188,7 @@ export async function loadAdapterConfig(projectDirectory?: string): Promise<Adap
         config.defaults.reasoning_retention,
         DEFAULT_CONFIG.defaults.reasoning_retention,
       ),
+      system_inject: normalizeStringArray(config.defaults.system_inject),
     },
   };
 }

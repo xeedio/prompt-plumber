@@ -19,6 +19,7 @@ const activeConfig: AdapterConfig = {
     strip_history_thinking: true,
     strip_stored_thinking_text: true,
     reasoning_retention: "none",
+    system_inject: [],
   },
   rules: [
     {
@@ -29,6 +30,7 @@ const activeConfig: AdapterConfig = {
       strip_history_thinking: true,
       strip_stored_thinking_text: true,
       reasoning_retention: "none",
+      system_inject: [],
     },
   ],
 };
@@ -111,6 +113,118 @@ describe("plugin hooks", () => {
       undefinedSessionOutput,
     );
     expect(undefinedSessionOutput.headers).toEqual({});
+  });
+
+  it("appends system_inject entries after merged system messages", async () => {
+    loadAdapterConfigMock.mockResolvedValue({
+      ...activeConfig,
+      rules: [
+        {
+          ...activeConfig.rules[0],
+          system_inject: [
+            "Close thinking before action output.",
+            "Emit tool calls outside <think> blocks.",
+          ],
+        },
+      ],
+    });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project" } as never)) as Record<
+      string,
+      (input: any, output: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-inject",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    const systemOutput = { system: ["alpha", "beta"] };
+    await hooks["experimental.chat.system.transform"](
+      {
+        sessionID: "s-inject",
+        model: { providerID: "vllm", id: "qwen3-coder-next" },
+      },
+      systemOutput,
+    );
+
+    expect(systemOutput.system).toEqual([
+      "alpha\n\nbeta",
+      "Close thinking before action output.",
+      "Emit tool calls outside <think> blocks.",
+    ]);
+  });
+
+  it("does not append system_inject entries for inactive anthropic sessions", async () => {
+    loadAdapterConfigMock.mockResolvedValue({
+      ...activeConfig,
+      rules: [
+        {
+          ...activeConfig.rules[0],
+          system_inject: ["Close thinking before action output."],
+        },
+      ],
+    });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project" } as never)) as Record<
+      string,
+      (input: any, output: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-anthropic-inactive",
+        provider: { info: { id: "anthropic" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    const systemOutput = { system: ["one", "two"] };
+    await hooks["experimental.chat.system.transform"](
+      {
+        sessionID: "s-anthropic-inactive",
+        model: { providerID: "anthropic", id: "qwen3-coder-next" },
+      },
+      systemOutput,
+    );
+
+    expect(systemOutput.system).toEqual(["one", "two"]);
+  });
+
+  it("keeps merged system output unchanged when system_inject is empty", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project" } as never)) as Record<
+      string,
+      (input: any, output: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-empty-inject",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    const systemOutput = { system: ["left", "right"] };
+    await hooks["experimental.chat.system.transform"](
+      {
+        sessionID: "s-empty-inject",
+        model: { providerId: "vllm", id: "qwen3-coder-next" },
+      },
+      systemOutput,
+    );
+
+    expect(systemOutput.system).toEqual(["left\n\nright"]);
   });
 
   it("wires all hooks and mutates outputs only for active vllm sessions", async () => {

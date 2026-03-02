@@ -47,6 +47,9 @@ const plugin = (async (ctx) => {
       }
 
       output.system = mergeSystemMessages(Array.isArray(output.system) ? output.system : []);
+      if (decision.systemInject && decision.systemInject.length > 0) {
+        output.system.push(...decision.systemInject);
+      }
     },
 
     "experimental.chat.messages.transform": async (_input, output) => {

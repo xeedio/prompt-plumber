@@ -18,6 +18,7 @@ const defaults: AdapterDefaults = {
   strip_history_thinking: true,
   strip_stored_thinking_text: true,
   reasoning_retention: "none",
+  system_inject: [],
 };
 
 describe("config defaults and normalization", () => {
@@ -56,6 +57,35 @@ describe("config defaults and normalization", () => {
 
     expect(normalized.providers).toEqual([]);
     expect(normalized.model_patterns).toEqual([]);
+  });
+
+  it("normalizes system_inject for string, string[] and undefined", () => {
+    const fromString = normalizeRule(
+      {
+        name: "string-inject",
+        system_inject: "close thinking before tool output" as unknown as string[],
+      },
+      defaults,
+    );
+
+    const fromArray = normalizeRule(
+      {
+        name: "array-inject",
+        system_inject: ["one", 2 as unknown as string, "two"],
+      },
+      defaults,
+    );
+
+    const fromUndefined = normalizeRule(
+      {
+        name: "undefined-inject",
+      },
+      defaults,
+    );
+
+    expect(fromString.system_inject).toEqual(["close thinking before tool output"]);
+    expect(fromArray.system_inject).toEqual(["one", "two"]);
+    expect(fromUndefined.system_inject).toEqual([]);
   });
 
   it("merges partial overrides and applies normalized rule defaults", () => {
@@ -190,6 +220,7 @@ describe("loadAdapterConfig", () => {
           strip_history_thinking: false,
           strip_stored_thinking_text: true,
           reasoning_retention: "all",
+          system_inject: [],
         },
       ]);
     });

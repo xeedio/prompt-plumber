@@ -10,6 +10,7 @@ const baseConfig: AdapterConfig = {
     strip_history_thinking: true,
     strip_stored_thinking_text: true,
     reasoning_retention: "none",
+    system_inject: [],
   },
   rules: [
     {
@@ -20,6 +21,7 @@ const baseConfig: AdapterConfig = {
       strip_history_thinking: true,
       strip_stored_thinking_text: true,
       reasoning_retention: "none",
+      system_inject: ["close thinking before tool output"],
     },
     {
       name: "wildcard",
@@ -29,6 +31,7 @@ const baseConfig: AdapterConfig = {
       strip_history_thinking: false,
       strip_stored_thinking_text: false,
       reasoning_retention: "all",
+      system_inject: ["use tool output outside think tags"],
     },
   ],
 };
@@ -45,6 +48,7 @@ describe("ParamsCache", () => {
     expect(decision.active).toBe(true);
     expect(decision.matchedRule).toBe("primary");
     expect(decision.reasoningRetention).toBe("none");
+    expect(decision.systemInject).toEqual(["close thinking before tool output"]);
   });
 
   it("skips anthropic providers entirely", () => {
@@ -70,6 +74,17 @@ describe("ParamsCache", () => {
     expect(decision.active).toBe(true);
     expect(decision.matchedRule).toBe("wildcard");
     expect(decision.stripHistoryThinking).toBe(false);
+  });
+
+  it("passes through rule system_inject into activation decision", () => {
+    const cache = new ParamsCache(baseConfig);
+    const decision = cache.rememberFromChatParams({
+      sessionID: "s9",
+      provider: "vllm-edge",
+      model: "my-coder-model",
+    });
+
+    expect(decision.systemInject).toEqual(["use tool output outside think tags"]);
   });
 
   it("returns cached decision by session id", () => {
@@ -106,6 +121,7 @@ describe("ParamsCache", () => {
       active: false,
       provider: "",
       model: "",
+      systemInject: [],
     });
     expect(decision.matchedRule).toBeUndefined();
   });
@@ -138,6 +154,7 @@ describe("ParamsCache", () => {
           strip_history_thinking: true,
           strip_stored_thinking_text: true,
           reasoning_retention: "none",
+          system_inject: [],
         },
       ],
     });
@@ -172,6 +189,7 @@ describe("ParamsCache", () => {
       active: false,
       provider: "",
       model: "",
+      systemInject: [],
     });
   });
 });
