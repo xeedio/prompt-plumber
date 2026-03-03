@@ -11,6 +11,8 @@ export interface AdapterDefaults {
   strip_history_thinking: boolean;
   strip_stored_thinking_text: boolean;
   reasoning_retention: ReasoningRetention;
+  recover_trapped_tool_calls: boolean;
+  recovery_max_retries: number;
   system_inject: string[];
 }
 
@@ -22,6 +24,8 @@ export interface ActivationRule {
   strip_history_thinking: boolean;
   strip_stored_thinking_text: boolean;
   reasoning_retention: ReasoningRetention;
+  recover_trapped_tool_calls: boolean;
+  recovery_max_retries: number;
   system_inject: string[];
 }
 
@@ -45,6 +49,8 @@ export const DEFAULT_CONFIG: AdapterConfig = {
     strip_history_thinking: true,
     strip_stored_thinking_text: true,
     reasoning_retention: "none",
+    recover_trapped_tool_calls: true,
+    recovery_max_retries: 3,
     system_inject: [],
   },
   rules: [
@@ -56,6 +62,8 @@ export const DEFAULT_CONFIG: AdapterConfig = {
       strip_history_thinking: true,
       strip_stored_thinking_text: true,
       reasoning_retention: "none",
+      recover_trapped_tool_calls: true,
+      recovery_max_retries: 3,
       system_inject: [
         "You MUST close your thinking with </think> BEFORE any tool calls, function calls, or structured output. NEVER place <tool_call>, function invocations, or action tags inside <think> blocks. Correct sequence: <think>reasoning</think> then tool calls.",
       ],
@@ -66,6 +74,20 @@ export const DEFAULT_CONFIG: AdapterConfig = {
 export function asReasoningRetention(value: unknown, fallback: ReasoningRetention): ReasoningRetention {
   if (value === "none" || value === "last-message" || value === "all") {
     return value;
+  }
+  return fallback;
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return fallback;
+}
+
+function asRecoveryMaxRetries(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
   }
   return fallback;
 }
@@ -100,6 +122,14 @@ export function normalizeRule(rule: Partial<ActivationRule>, defaults: AdapterDe
     strip_stored_thinking_text:
       rule.strip_stored_thinking_text ?? defaults.strip_stored_thinking_text,
     reasoning_retention: asReasoningRetention(rule.reasoning_retention, defaults.reasoning_retention),
+    recover_trapped_tool_calls: asBoolean(
+      rule.recover_trapped_tool_calls,
+      defaults.recover_trapped_tool_calls,
+    ),
+    recovery_max_retries: asRecoveryMaxRetries(
+      rule.recovery_max_retries,
+      defaults.recovery_max_retries,
+    ),
     system_inject: systemInject,
   };
 }
@@ -115,6 +145,14 @@ export function mergeConfig(base: AdapterConfig, override: PartialAdapterConfig)
     reasoning_retention: asReasoningRetention(
       override.defaults?.reasoning_retention,
       base.defaults.reasoning_retention,
+    ),
+    recover_trapped_tool_calls: asBoolean(
+      override.defaults?.recover_trapped_tool_calls,
+      base.defaults.recover_trapped_tool_calls,
+    ),
+    recovery_max_retries: asRecoveryMaxRetries(
+      override.defaults?.recovery_max_retries,
+      base.defaults.recovery_max_retries,
     ),
     system_inject: hasSystemInjectOverride
       ? normalizeStringArray(
@@ -189,6 +227,14 @@ export async function loadAdapterConfig(projectDirectory?: string): Promise<Adap
       reasoning_retention: asReasoningRetention(
         config.defaults.reasoning_retention,
         DEFAULT_CONFIG.defaults.reasoning_retention,
+      ),
+      recover_trapped_tool_calls: asBoolean(
+        config.defaults.recover_trapped_tool_calls,
+        DEFAULT_CONFIG.defaults.recover_trapped_tool_calls,
+      ),
+      recovery_max_retries: asRecoveryMaxRetries(
+        config.defaults.recovery_max_retries,
+        DEFAULT_CONFIG.defaults.recovery_max_retries,
       ),
       system_inject: normalizeStringArray(config.defaults.system_inject),
     },

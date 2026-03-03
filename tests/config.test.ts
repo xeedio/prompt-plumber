@@ -18,6 +18,8 @@ const defaults: AdapterDefaults = {
   strip_history_thinking: true,
   strip_stored_thinking_text: true,
   reasoning_retention: "none",
+  recover_trapped_tool_calls: true,
+  recovery_max_retries: 3,
   system_inject: [],
 };
 
@@ -36,6 +38,14 @@ describe("config defaults and normalization", () => {
     expect(rule?.system_inject[0]).toContain("<tool_call>");
   });
 
+  it("includes trapped tool-call recovery defaults in base config and qwen3 rule", () => {
+    const rule = DEFAULT_CONFIG.rules[0];
+    expect(DEFAULT_CONFIG.defaults.recover_trapped_tool_calls).toBe(true);
+    expect(DEFAULT_CONFIG.defaults.recovery_max_retries).toBe(3);
+    expect(rule?.recover_trapped_tool_calls).toBe(true);
+    expect(rule?.recovery_max_retries).toBe(3);
+  });
+
   it("normalizes rule fields and falls back to defaults", () => {
     const normalized = normalizeRule(
       {
@@ -51,6 +61,8 @@ describe("config defaults and normalization", () => {
     expect(normalized.model_patterns).toEqual(["qwen3"]);
     expect(normalized.reasoning_retention).toBe("none");
     expect(normalized.merge_system_messages).toBe(true);
+    expect(normalized.recover_trapped_tool_calls).toBe(true);
+    expect(normalized.recovery_max_retries).toBe(3);
   });
 
   it("normalizes non-array providers/model_patterns to empty arrays", () => {
@@ -228,6 +240,8 @@ describe("loadAdapterConfig", () => {
           strip_history_thinking: false,
           strip_stored_thinking_text: true,
           reasoning_retention: "all",
+          recover_trapped_tool_calls: true,
+          recovery_max_retries: 3,
           system_inject: [],
         },
       ]);

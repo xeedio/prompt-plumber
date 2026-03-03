@@ -10,6 +10,8 @@ const baseConfig: AdapterConfig = {
     strip_history_thinking: true,
     strip_stored_thinking_text: true,
     reasoning_retention: "none",
+    recover_trapped_tool_calls: true,
+    recovery_max_retries: 3,
     system_inject: [],
   },
   rules: [
@@ -21,6 +23,8 @@ const baseConfig: AdapterConfig = {
       strip_history_thinking: true,
       strip_stored_thinking_text: true,
       reasoning_retention: "none",
+      recover_trapped_tool_calls: true,
+      recovery_max_retries: 3,
       system_inject: ["close thinking before tool output"],
     },
     {
@@ -31,6 +35,8 @@ const baseConfig: AdapterConfig = {
       strip_history_thinking: false,
       strip_stored_thinking_text: false,
       reasoning_retention: "all",
+      recover_trapped_tool_calls: true,
+      recovery_max_retries: 2,
       system_inject: ["use tool output outside think tags"],
     },
   ],
@@ -48,6 +54,8 @@ describe("ParamsCache", () => {
     expect(decision.active).toBe(true);
     expect(decision.matchedRule).toBe("primary");
     expect(decision.reasoningRetention).toBe("none");
+    expect(decision.recoverTrappedToolCalls).toBe(true);
+    expect(decision.recoveryMaxRetries).toBe(3);
     expect(decision.systemInject).toEqual(["close thinking before tool output"]);
   });
 
@@ -85,6 +93,8 @@ describe("ParamsCache", () => {
     });
 
     expect(decision.systemInject).toEqual(["use tool output outside think tags"]);
+    expect(decision.recoverTrappedToolCalls).toBe(true);
+    expect(decision.recoveryMaxRetries).toBe(2);
   });
 
   it("returns cached decision by session id", () => {
@@ -121,6 +131,8 @@ describe("ParamsCache", () => {
       active: false,
       provider: "",
       model: "",
+      recoverTrappedToolCalls: false,
+      recoveryMaxRetries: 0,
       systemInject: [],
     });
     expect(decision.matchedRule).toBeUndefined();
@@ -154,6 +166,8 @@ describe("ParamsCache", () => {
           strip_history_thinking: true,
           strip_stored_thinking_text: true,
           reasoning_retention: "none",
+          recover_trapped_tool_calls: true,
+          recovery_max_retries: 3,
           system_inject: [],
         },
       ],
@@ -189,6 +203,8 @@ describe("ParamsCache", () => {
       active: false,
       provider: "",
       model: "",
+      recoverTrappedToolCalls: false,
+      recoveryMaxRetries: 0,
       systemInject: [],
     });
   });

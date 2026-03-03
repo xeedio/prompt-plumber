@@ -3,6 +3,13 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { loadAdapterConfig } from "./config.js";
 import { ParamsCache } from "./hooks/params-cache.js";
 import { mergeSystemMessages } from "./hooks/system-merge.js";
+import {
+  RECOVERY_MESSAGE,
+  canRetry,
+  createRecoveryTracker,
+  hasTrappedToolCall,
+  recordAttempt,
+} from "./hooks/toolcall-recovery.js";
 import { stripAssistantHistoryThinking, stripThinkingText } from "./hooks/thinking-strip.js";
 
 function asString(value: unknown): string {
@@ -26,8 +33,75 @@ const plugin = (async (ctx) => {
   }
 
   const cache = new ParamsCache(config);
+  const tracker = createRecoveryTracker(3);
 
   return {
+    event: async (input) => {
+      const event = input.event as {
+        type?: string;
+        properties?: {
+          sessionID?: string;
+          status?: {
+            type?: string;
+          };
+        };
+      };
+
+      let sessionID: string | undefined;
+      if (event.type === "session.idle" && event.properties?.sessionID) {
+        sessionID = event.properties.sessionID;
+      } else if (
+        event.type === "session.status" &&
+        event.properties?.status?.type === "idle" &&
+        event.properties?.sessionID
+      ) {
+        sessionID = event.properties.sessionID;
+      }
+
+      if (!sessionID) {
+        return;
+      }
+
+      const decision = cache.resolve({ sessionID });
+      if (!decision.active || !decision.recoverTrappedToolCalls) {
+        return;
+      }
+
+      const sessionTracker = {
+        attempts: tracker.attempts,
+        maxRetries: decision.recoveryMaxRetries,
+      };
+      if (!canRetry(sessionTracker, sessionID)) {
+        return;
+      }
+
+      try {
+        const result = await ctx.client.session.messages({ path: { id: sessionID } });
+        if (!Array.isArray(result.data) || result.data.length === 0) {
+          return;
+        }
+
+        const lastAssistant = [...result.data]
+          .reverse()
+          .find((message) => message.info?.role === "assistant");
+        if (!lastAssistant || !Array.isArray(lastAssistant.parts)) {
+          return;
+        }
+
+        if (!hasTrappedToolCall(lastAssistant.parts)) {
+          return;
+        }
+
+        recordAttempt(sessionTracker, sessionID);
+        await ctx.client.session.promptAsync({
+          path: { id: sessionID },
+          body: {
+            parts: [{ type: "text", text: RECOVERY_MESSAGE }],
+          },
+        });
+      } catch {}
+    },
+
     "chat.params": async (input, _output) => {
       cache.rememberFromChatParams({
         sessionID: input.sessionID,

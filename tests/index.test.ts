@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdapterConfig } from "../src/config.js";
+import { RECOVERY_MESSAGE } from "../src/hooks/toolcall-recovery.js";
 
 const loadAdapterConfigMock = vi.hoisted(() => vi.fn());
 
@@ -19,6 +20,8 @@ const activeConfig: AdapterConfig = {
     strip_history_thinking: true,
     strip_stored_thinking_text: true,
     reasoning_retention: "none",
+    recover_trapped_tool_calls: true,
+    recovery_max_retries: 3,
     system_inject: [],
   },
   rules: [
@@ -30,10 +33,21 @@ const activeConfig: AdapterConfig = {
       strip_history_thinking: true,
       strip_stored_thinking_text: true,
       reasoning_retention: "none",
+      recover_trapped_tool_calls: true,
+      recovery_max_retries: 3,
       system_inject: [],
     },
   ],
 };
+
+function createMockClient() {
+  return {
+    session: {
+      messages: vi.fn(),
+      promptAsync: vi.fn(),
+    },
+  };
+}
 
 describe("plugin hooks", () => {
   beforeEach(() => {
@@ -113,6 +127,223 @@ describe("plugin hooks", () => {
       undefinedSessionOutput,
     );
     expect(undefinedSessionOutput.headers).toEqual({});
+  });
+
+  it("triggers recovery prompt on session.idle when assistant has trapped tool_call XML", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: { role: "assistant" },
+          parts: [
+            {
+              type: "reasoning",
+              text: "thinking <tool_call>{\"name\":\"bash\"}</tool_call>",
+            },
+          ],
+        },
+      ],
+    });
+    client.session.promptAsync.mockResolvedValue({});
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-recovery",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-recovery" } },
+    });
+
+    expect(client.session.messages).toHaveBeenCalledWith({ path: { id: "s-recovery" } });
+    expect(client.session.promptAsync).toHaveBeenCalledTimes(1);
+    expect(client.session.promptAsync).toHaveBeenCalledWith({
+      path: { id: "s-recovery" },
+      body: {
+        parts: [{ type: "text", text: RECOVERY_MESSAGE }],
+      },
+    });
+  });
+
+  it("triggers recovery prompt on session.status idle events", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: { role: "assistant" },
+          parts: [{ type: "reasoning", text: "x <tool_call>bad</tool_call> y" }],
+        },
+      ],
+    });
+    client.session.promptAsync.mockResolvedValue({});
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-status",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "session.status",
+        properties: { sessionID: "s-status", status: { type: "idle" } },
+      },
+    });
+
+    expect(client.session.promptAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not trigger recovery prompt when no trapped tool_call XML exists", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: { role: "assistant" },
+          parts: [{ type: "reasoning", text: "plain reasoning" }],
+        },
+      ],
+    });
+    client.session.promptAsync.mockResolvedValue({});
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-no-trap",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-no-trap" } },
+    });
+
+    expect(client.session.messages).toHaveBeenCalledWith({ path: { id: "s-no-trap" } });
+    expect(client.session.promptAsync).not.toHaveBeenCalled();
+  });
+
+  it("does not trigger recovery prompt for inactive anthropic sessions", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: { role: "assistant" },
+          parts: [
+            {
+              type: "reasoning",
+              text: "thinking <tool_call>{\"name\":\"bash\"}</tool_call>",
+            },
+          ],
+        },
+      ],
+    });
+    client.session.promptAsync.mockResolvedValue({});
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-anthropic-idle",
+        provider: { info: { id: "anthropic" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-anthropic-idle" } },
+    });
+
+    expect(client.session.messages).not.toHaveBeenCalled();
+    expect(client.session.promptAsync).not.toHaveBeenCalled();
+  });
+
+  it("respects per-session max recovery retries", async () => {
+    loadAdapterConfigMock.mockResolvedValue({
+      ...activeConfig,
+      rules: [
+        {
+          ...activeConfig.rules[0],
+          recovery_max_retries: 2,
+        },
+      ],
+    });
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: { role: "assistant" },
+          parts: [
+            {
+              type: "reasoning",
+              text: "thinking <tool_call>{\"name\":\"bash\"}</tool_call>",
+            },
+          ],
+        },
+      ],
+    });
+    client.session.promptAsync.mockResolvedValue({});
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-limit",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-limit" } },
+    });
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-limit" } },
+    });
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-limit" } },
+    });
+
+    expect(client.session.messages).toHaveBeenCalledTimes(2);
+    expect(client.session.promptAsync).toHaveBeenCalledTimes(2);
   });
 
   it("appends system_inject entries after merged system messages", async () => {

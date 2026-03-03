@@ -8,6 +8,8 @@ export interface ActivationDecision {
   stripHistoryThinking: boolean;
   stripStoredThinkingText: boolean;
   reasoningRetention: ReasoningRetention;
+  recoverTrappedToolCalls: boolean;
+  recoveryMaxRetries: number;
   systemInject: string[];
   matchedRule?: string;
 }
@@ -75,6 +77,8 @@ function inactiveDecision(provider: string, model: string): ActivationDecision {
     stripHistoryThinking: false,
     stripStoredThinkingText: false,
     reasoningRetention: "none",
+    recoverTrappedToolCalls: false,
+    recoveryMaxRetries: 0,
     systemInject: [],
   };
 }
@@ -92,6 +96,8 @@ function decisionFromRule(
     stripHistoryThinking: rule.strip_history_thinking,
     stripStoredThinkingText: rule.strip_stored_thinking_text,
     reasoningRetention: rule.reasoning_retention,
+    recoverTrappedToolCalls: rule.recover_trapped_tool_calls,
+    recoveryMaxRetries: rule.recovery_max_retries,
     systemInject: rule.system_inject,
     matchedRule: rule.name,
   };
