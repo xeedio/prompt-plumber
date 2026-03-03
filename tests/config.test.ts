@@ -28,6 +28,14 @@ describe("config defaults and normalization", () => {
     expect(DEFAULT_CONFIG.rules[0]?.providers).toContain("vllm");
   });
 
+  it("sets a non-empty default system_inject instruction on the qwen3 rule", () => {
+    const rule = DEFAULT_CONFIG.rules[0];
+    expect(rule?.name).toBe("default-vllm-qwen3");
+    expect(rule?.system_inject.length).toBeGreaterThan(0);
+    expect(rule?.system_inject[0]).toContain("</think>");
+    expect(rule?.system_inject[0]).toContain("<tool_call>");
+  });
+
   it("normalizes rule fields and falls back to defaults", () => {
     const normalized = normalizeRule(
       {

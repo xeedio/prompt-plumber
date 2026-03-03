@@ -56,7 +56,9 @@ export const DEFAULT_CONFIG: AdapterConfig = {
       strip_history_thinking: true,
       strip_stored_thinking_text: true,
       reasoning_retention: "none",
-      system_inject: [],
+      system_inject: [
+        "You MUST close your thinking with </think> BEFORE any tool calls, function calls, or structured output. NEVER place <tool_call>, function invocations, or action tags inside <think> blocks. Correct sequence: <think>reasoning</think> then tool calls.",
+      ],
     },
   ],
 };

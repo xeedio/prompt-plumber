@@ -18,6 +18,7 @@ export interface ChatMessage {
 
 const THINK_BLOCK_PATTERN = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
 const THINK_TAG_PATTERN = /<\/?think\b[^>]*>/gi;
+const TOOL_CALL_BLOCK_PATTERN = /<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi;
 
 export function stripThinkingText(input: string): string {
   return input.replace(THINK_BLOCK_PATTERN, "").replace(THINK_TAG_PATTERN, "");
@@ -36,10 +37,12 @@ function isReasoningPart(part: MessagePart): boolean {
 function sanitizePart(part: MessagePart): MessagePart {
   const nextPart: MessagePart = { ...part };
   if (typeof nextPart.text === "string") {
-    nextPart.text = stripThinkingText(nextPart.text);
+    nextPart.text = stripThinkingText(nextPart.text).replace(TOOL_CALL_BLOCK_PATTERN, "").trim();
   }
   if (typeof nextPart.content === "string") {
-    nextPart.content = stripThinkingText(nextPart.content);
+    nextPart.content = stripThinkingText(nextPart.content)
+      .replace(TOOL_CALL_BLOCK_PATTERN, "")
+      .trim();
   }
   return nextPart;
 }
