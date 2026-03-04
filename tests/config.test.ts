@@ -21,6 +21,8 @@ const defaults: AdapterDefaults = {
   recover_trapped_tool_calls: true,
   recovery_max_retries: 3,
   system_inject: [],
+  auto_compact: true,
+  compaction_threshold: 170000,
 };
 
 describe("config defaults and normalization", () => {
@@ -63,6 +65,8 @@ describe("config defaults and normalization", () => {
     expect(normalized.merge_system_messages).toBe(true);
     expect(normalized.recover_trapped_tool_calls).toBe(true);
     expect(normalized.recovery_max_retries).toBe(3);
+    expect(normalized.auto_compact).toBe(true);
+    expect(normalized.compaction_threshold).toBe(170000);
   });
 
   it("normalizes non-array providers/model_patterns to empty arrays", () => {
@@ -129,12 +133,16 @@ describe("config defaults and normalization", () => {
     expect(merged.enabled).toBe(false);
     expect(merged.defaults.strip_history_thinking).toBe(false);
     expect(merged.defaults.reasoning_retention).toBe("last-message");
+    expect(merged.defaults.auto_compact).toBe(true);
+    expect(merged.defaults.compaction_threshold).toBe(170000);
     expect(merged.rules[0]).toMatchObject({
       name: "custom",
       providers: ["vllm"],
       model_patterns: ["qwen3-coder"],
       strip_history_thinking: false,
       reasoning_retention: "last-message",
+      auto_compact: true,
+      compaction_threshold: 170000,
     });
   });
 });
@@ -183,6 +191,7 @@ describe("loadAdapterConfig", () => {
       const loaded = await loadAdapterConfig();
       expect(loaded.enabled).toBe(false);
       expect(loaded.defaults).toEqual(DEFAULT_CONFIG.defaults);
+      expect(loaded.log_level).toBe("info");
     });
   });
 
@@ -218,10 +227,12 @@ describe("loadAdapterConfig", () => {
           },
           "rules": [
             {
-              "name": "project",
-              "providers": ["vllm"],
-              "model_patterns": ["qwen3-coder"],
-              "merge_system_messages": false
+            "name": "project",
+            "providers": ["vllm"],
+            "model_patterns": ["qwen3-coder"],
+            "merge_system_messages": false,
+            "auto_compact": false,
+            "compaction_threshold": 120000
             }
           ]
         }`,
@@ -243,6 +254,8 @@ describe("loadAdapterConfig", () => {
           recover_trapped_tool_calls: true,
           recovery_max_retries: 3,
           system_inject: [],
+          auto_compact: false,
+          compaction_threshold: 120000,
         },
       ]);
     });

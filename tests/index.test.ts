@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdapterConfig } from "../src/config.js";
 import { RECOVERY_MESSAGE } from "../src/hooks/toolcall-recovery.js";
@@ -15,6 +15,7 @@ vi.mock("../src/config.js", async () => {
 
 const activeConfig: AdapterConfig = {
   enabled: true,
+  log_level: "info",
   defaults: {
     merge_system_messages: true,
     strip_history_thinking: true,
@@ -23,6 +24,8 @@ const activeConfig: AdapterConfig = {
     recover_trapped_tool_calls: true,
     recovery_max_retries: 3,
     system_inject: [],
+    auto_compact: true,
+    compaction_threshold: 170000,
   },
   rules: [
     {
@@ -36,6 +39,8 @@ const activeConfig: AdapterConfig = {
       recover_trapped_tool_calls: true,
       recovery_max_retries: 3,
       system_inject: [],
+      auto_compact: true,
+      compaction_threshold: 170000,
     },
   ],
 };
@@ -45,6 +50,7 @@ function createMockClient() {
     session: {
       messages: vi.fn(),
       promptAsync: vi.fn(),
+      summarize: vi.fn(),
     },
   };
 }
@@ -52,6 +58,11 @@ function createMockClient() {
 describe("plugin hooks", () => {
   beforeEach(() => {
     loadAdapterConfigMock.mockReset();
+    process.env.PROMPT_PLUMBER_LOG_LEVEL = "error";
+  });
+
+  afterEach(() => {
+    delete process.env.PROMPT_PLUMBER_LOG_LEVEL;
   });
 
   it("returns no hooks when adapter config is disabled", async () => {
@@ -161,6 +172,21 @@ describe("plugin hooks", () => {
       },
       {},
     );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-recovery",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 1000, output: 100, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
 
     await hooks["event"]({
       event: { type: "session.idle", properties: { sessionID: "s-recovery" } },
@@ -331,6 +357,21 @@ describe("plugin hooks", () => {
       },
       {},
     );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-limit",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 1000, output: 100, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
 
     await hooks["event"]({
       event: { type: "session.idle", properties: { sessionID: "s-limit" } },
@@ -571,5 +612,121 @@ describe("plugin hooks", () => {
       anthropicSystemOutput,
     );
     expect(anthropicSystemOutput.system).toEqual(["one", "two"]);
+  });
+
+  it("triggers proactive compaction via session.summarize when threshold is exceeded", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-compact",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-compact",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: {
+              input: 169000,
+              output: 2000,
+              reasoning: 0,
+              cache: { read: 1000, write: 0 },
+            },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "s-compact" },
+      },
+    });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+    expect(client.session.summarize).toHaveBeenCalledWith({
+      path: { id: "s-compact" },
+      body: {
+        providerID: "vllm",
+        modelID: "qwen3-coder-next",
+      },
+    });
+  });
+
+  it("does not trigger proactive compaction when auto_compact is false", async () => {
+    loadAdapterConfigMock.mockResolvedValue({
+      ...activeConfig,
+      rules: [
+        {
+          ...activeConfig.rules[0],
+          auto_compact: false,
+        },
+      ],
+    });
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-no-compact",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-no-compact",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: {
+              input: 180000,
+              output: 2000,
+              cache: { read: 0, write: 0 },
+            },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "s-no-compact" },
+      },
+    });
+
+    expect(client.session.summarize).not.toHaveBeenCalled();
   });
 });

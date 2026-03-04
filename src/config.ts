@@ -5,6 +5,7 @@ import path from "node:path";
 import { parse, printParseErrorCode } from "jsonc-parser";
 
 export type ReasoningRetention = "none" | "last-message" | "all";
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface AdapterDefaults {
   merge_system_messages: boolean;
@@ -14,6 +15,8 @@ export interface AdapterDefaults {
   recover_trapped_tool_calls: boolean;
   recovery_max_retries: number;
   system_inject: string[];
+  auto_compact: boolean;
+  compaction_threshold: number;
 }
 
 export interface ActivationRule {
@@ -27,10 +30,13 @@ export interface ActivationRule {
   recover_trapped_tool_calls: boolean;
   recovery_max_retries: number;
   system_inject: string[];
+  auto_compact: boolean;
+  compaction_threshold: number;
 }
 
 export interface AdapterConfig {
   enabled: boolean;
+  log_level: LogLevel;
   defaults: AdapterDefaults;
   rules: ActivationRule[];
 }
@@ -44,6 +50,7 @@ export type PartialAdapterConfig = Partial<
 
 export const DEFAULT_CONFIG: AdapterConfig = {
   enabled: true,
+  log_level: "info",
   defaults: {
     merge_system_messages: true,
     strip_history_thinking: true,
@@ -52,6 +59,8 @@ export const DEFAULT_CONFIG: AdapterConfig = {
     recover_trapped_tool_calls: true,
     recovery_max_retries: 3,
     system_inject: [],
+    auto_compact: true,
+    compaction_threshold: 170000,
   },
   rules: [
     {
@@ -67,9 +76,18 @@ export const DEFAULT_CONFIG: AdapterConfig = {
       system_inject: [
         "You MUST close your thinking with </think> BEFORE any tool calls, function calls, or structured output. NEVER place <tool_call>, function invocations, or action tags inside <think> blocks. Correct sequence: <think>reasoning</think> then tool calls.",
       ],
+      auto_compact: true,
+      compaction_threshold: 170000,
     },
   ],
 };
+
+export function asLogLevel(value: unknown, fallback: LogLevel): LogLevel {
+  if (value === "debug" || value === "info" || value === "warn" || value === "error") {
+    return value;
+  }
+  return fallback;
+}
 
 export function asReasoningRetention(value: unknown, fallback: ReasoningRetention): ReasoningRetention {
   if (value === "none" || value === "last-message" || value === "all") {
@@ -87,6 +105,13 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
 
 function asRecoveryMaxRetries(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  return fallback;
+}
+
+function asCompactionThreshold(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return Math.floor(value);
   }
   return fallback;
@@ -131,6 +156,11 @@ export function normalizeRule(rule: Partial<ActivationRule>, defaults: AdapterDe
       defaults.recovery_max_retries,
     ),
     system_inject: systemInject,
+    auto_compact: asBoolean(rule.auto_compact, defaults.auto_compact),
+    compaction_threshold: asCompactionThreshold(
+      rule.compaction_threshold,
+      defaults.compaction_threshold,
+    ),
   };
 }
 
@@ -160,6 +190,11 @@ export function mergeConfig(base: AdapterConfig, override: PartialAdapterConfig)
             .system_inject,
         )
       : normalizeStringArray(base.defaults.system_inject),
+    auto_compact: asBoolean(override.defaults?.auto_compact, base.defaults.auto_compact),
+    compaction_threshold: asCompactionThreshold(
+      override.defaults?.compaction_threshold,
+      base.defaults.compaction_threshold,
+    ),
   };
 
   const rawRules = Array.isArray(override.rules) ? override.rules : base.rules;
@@ -167,6 +202,7 @@ export function mergeConfig(base: AdapterConfig, override: PartialAdapterConfig)
 
   return {
     enabled: override.enabled ?? base.enabled,
+    log_level: asLogLevel(override.log_level, base.log_level),
     defaults,
     rules: normalizedRules,
   };
@@ -221,6 +257,7 @@ export async function loadAdapterConfig(projectDirectory?: string): Promise<Adap
 
   return {
     ...config,
+    log_level: asLogLevel(config.log_level, DEFAULT_CONFIG.log_level),
     rules: config.rules.map((rule) => normalizeRule(rule, config.defaults)),
     defaults: {
       ...config.defaults,
@@ -237,6 +274,11 @@ export async function loadAdapterConfig(projectDirectory?: string): Promise<Adap
         DEFAULT_CONFIG.defaults.recovery_max_retries,
       ),
       system_inject: normalizeStringArray(config.defaults.system_inject),
+      auto_compact: asBoolean(config.defaults.auto_compact, DEFAULT_CONFIG.defaults.auto_compact),
+      compaction_threshold: asCompactionThreshold(
+        config.defaults.compaction_threshold,
+        DEFAULT_CONFIG.defaults.compaction_threshold,
+      ),
     },
   };
 }

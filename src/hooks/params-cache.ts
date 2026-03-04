@@ -11,6 +11,8 @@ export interface ActivationDecision {
   recoverTrappedToolCalls: boolean;
   recoveryMaxRetries: number;
   systemInject: string[];
+  autoCompact: boolean;
+  compactionThreshold: number;
   matchedRule?: string;
 }
 
@@ -80,6 +82,8 @@ function inactiveDecision(provider: string, model: string): ActivationDecision {
     recoverTrappedToolCalls: false,
     recoveryMaxRetries: 0,
     systemInject: [],
+    autoCompact: false,
+    compactionThreshold: 0,
   };
 }
 
@@ -99,6 +103,8 @@ function decisionFromRule(
     recoverTrappedToolCalls: rule.recover_trapped_tool_calls,
     recoveryMaxRetries: rule.recovery_max_retries,
     systemInject: rule.system_inject,
+    autoCompact: rule.auto_compact,
+    compactionThreshold: rule.compaction_threshold,
     matchedRule: rule.name,
   };
 }

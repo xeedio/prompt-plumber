@@ -13,6 +13,8 @@ const baseConfig: AdapterConfig = {
     recover_trapped_tool_calls: true,
     recovery_max_retries: 3,
     system_inject: [],
+    auto_compact: true,
+    compaction_threshold: 170000,
   },
   rules: [
     {
@@ -26,6 +28,8 @@ const baseConfig: AdapterConfig = {
       recover_trapped_tool_calls: true,
       recovery_max_retries: 3,
       system_inject: ["close thinking before tool output"],
+      auto_compact: true,
+      compaction_threshold: 170000,
     },
     {
       name: "wildcard",
@@ -38,6 +42,8 @@ const baseConfig: AdapterConfig = {
       recover_trapped_tool_calls: true,
       recovery_max_retries: 2,
       system_inject: ["use tool output outside think tags"],
+      auto_compact: false,
+      compaction_threshold: 120000,
     },
   ],
 };
@@ -57,6 +63,8 @@ describe("ParamsCache", () => {
     expect(decision.recoverTrappedToolCalls).toBe(true);
     expect(decision.recoveryMaxRetries).toBe(3);
     expect(decision.systemInject).toEqual(["close thinking before tool output"]);
+    expect(decision.autoCompact).toBe(true);
+    expect(decision.compactionThreshold).toBe(170000);
   });
 
   it("skips anthropic providers entirely", () => {
@@ -95,6 +103,8 @@ describe("ParamsCache", () => {
     expect(decision.systemInject).toEqual(["use tool output outside think tags"]);
     expect(decision.recoverTrappedToolCalls).toBe(true);
     expect(decision.recoveryMaxRetries).toBe(2);
+    expect(decision.autoCompact).toBe(false);
+    expect(decision.compactionThreshold).toBe(120000);
   });
 
   it("returns cached decision by session id", () => {
@@ -134,6 +144,8 @@ describe("ParamsCache", () => {
       recoverTrappedToolCalls: false,
       recoveryMaxRetries: 0,
       systemInject: [],
+      autoCompact: false,
+      compactionThreshold: 0,
     });
     expect(decision.matchedRule).toBeUndefined();
   });
@@ -169,6 +181,8 @@ describe("ParamsCache", () => {
           recover_trapped_tool_calls: true,
           recovery_max_retries: 3,
           system_inject: [],
+          auto_compact: true,
+          compaction_threshold: 170000,
         },
       ],
     });
@@ -206,6 +220,8 @@ describe("ParamsCache", () => {
       recoverTrappedToolCalls: false,
       recoveryMaxRetries: 0,
       systemInject: [],
+      autoCompact: false,
+      compactionThreshold: 0,
     });
   });
 });
