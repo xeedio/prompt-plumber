@@ -25,4 +25,9 @@ describe("mergeSystemMessages", () => {
     const mixed = ["first", null, "second"] as unknown as string[];
     expect(mergeSystemMessages(mixed)).toEqual(["first\n\nsecond"]);
   });
+
+  it("deduplicates repeated normalized entries before merge", () => {
+    expect(mergeSystemMessages([" first ", "first", "second", "second"]))
+      .toEqual(["first\n\nsecond"]);
+  });
 });

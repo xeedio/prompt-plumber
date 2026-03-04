@@ -3,9 +3,19 @@ export function mergeSystemMessages(systemMessages: string[]): string[] {
     .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
     .filter((entry) => entry.length > 0);
 
-  if (normalized.length <= 1) {
-    return normalized;
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of normalized) {
+    if (seen.has(entry)) {
+      continue;
+    }
+    seen.add(entry);
+    deduped.push(entry);
   }
 
-  return [normalized.join("\n\n")];
+  if (deduped.length <= 1) {
+    return deduped;
+  }
+
+  return [deduped.join("\n\n")];
 }
