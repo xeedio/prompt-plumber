@@ -23,6 +23,7 @@ const defaults: AdapterDefaults = {
   system_inject: [],
   auto_compact: true,
   compaction_threshold: 170000,
+  compaction_threshold_pct: 0.66,
 };
 
 describe("config defaults and normalization", () => {
@@ -67,6 +68,7 @@ describe("config defaults and normalization", () => {
     expect(normalized.recovery_max_retries).toBe(3);
     expect(normalized.auto_compact).toBe(true);
     expect(normalized.compaction_threshold).toBe(170000);
+    expect(normalized.compaction_threshold_pct).toBe(0.66);
   });
 
   it("normalizes non-array providers/model_patterns to empty arrays", () => {
@@ -81,6 +83,33 @@ describe("config defaults and normalization", () => {
 
     expect(normalized.providers).toEqual([]);
     expect(normalized.model_patterns).toEqual([]);
+  });
+
+  it("defaults missing rule names and supports explicit defaults.system_inject override", () => {
+    const unnamed = normalizeRule(
+      {
+        providers: ["vllm"],
+        model_patterns: ["qwen3"],
+      },
+      defaults,
+    );
+    expect(unnamed.name).toBe("unnamed-rule");
+
+    const merged = mergeConfig(DEFAULT_CONFIG, {
+      defaults: {
+        system_inject: "forced inject" as unknown as string[],
+      },
+      rules: [
+        {
+          name: "inherits-system-inject",
+          providers: ["vllm"],
+          model_patterns: ["qwen3"],
+        },
+      ],
+    });
+
+    expect(merged.defaults.system_inject).toEqual(["forced inject"]);
+    expect(merged.rules[0]?.system_inject).toEqual([]);
   });
 
   it("normalizes system_inject for string, string[] and undefined", () => {
@@ -135,6 +164,7 @@ describe("config defaults and normalization", () => {
     expect(merged.defaults.reasoning_retention).toBe("last-message");
     expect(merged.defaults.auto_compact).toBe(true);
     expect(merged.defaults.compaction_threshold).toBe(170000);
+    expect(merged.defaults.compaction_threshold_pct).toBe(0.66);
     expect(merged.rules[0]).toMatchObject({
       name: "custom",
       providers: ["vllm"],
@@ -143,7 +173,44 @@ describe("config defaults and normalization", () => {
       reasoning_retention: "last-message",
       auto_compact: true,
       compaction_threshold: 170000,
+      compaction_threshold_pct: 0.66,
     });
+  });
+
+  it("normalizes compaction threshold pct edge values", () => {
+    const zero = normalizeRule(
+      {
+        name: "pct-zero",
+        compaction_threshold_pct: 0,
+      },
+      defaults,
+    );
+    const one = normalizeRule(
+      {
+        name: "pct-one",
+        compaction_threshold_pct: 1,
+      },
+      defaults,
+    );
+    const half = normalizeRule(
+      {
+        name: "pct-half",
+        compaction_threshold_pct: 0.5,
+      },
+      defaults,
+    );
+    const invalid = normalizeRule(
+      {
+        name: "pct-invalid",
+        compaction_threshold_pct: 2,
+      },
+      defaults,
+    );
+
+    expect(zero.compaction_threshold_pct).toBe(0);
+    expect(one.compaction_threshold_pct).toBe(1);
+    expect(half.compaction_threshold_pct).toBe(0.5);
+    expect(invalid.compaction_threshold_pct).toBe(0.66);
   });
 });
 
@@ -232,7 +299,8 @@ describe("loadAdapterConfig", () => {
             "model_patterns": ["qwen3-coder"],
             "merge_system_messages": false,
             "auto_compact": false,
-            "compaction_threshold": 120000
+            "compaction_threshold": 120000,
+            "compaction_threshold_pct": 0.5
             }
           ]
         }`,
@@ -256,6 +324,7 @@ describe("loadAdapterConfig", () => {
           system_inject: [],
           auto_compact: false,
           compaction_threshold: 120000,
+          compaction_threshold_pct: 0.5,
         },
       ]);
     });

@@ -13,6 +13,7 @@ export interface ActivationDecision {
   systemInject: string[];
   autoCompact: boolean;
   compactionThreshold: number;
+  compactionThresholdPct: number;
   matchedRule?: string;
 }
 
@@ -84,6 +85,7 @@ function inactiveDecision(provider: string, model: string): ActivationDecision {
     systemInject: [],
     autoCompact: false,
     compactionThreshold: 0,
+    compactionThresholdPct: 0,
   };
 }
 
@@ -105,6 +107,7 @@ function decisionFromRule(
     systemInject: rule.system_inject,
     autoCompact: rule.auto_compact,
     compactionThreshold: rule.compaction_threshold,
+    compactionThresholdPct: rule.compaction_threshold_pct,
     matchedRule: rule.name,
   };
 }

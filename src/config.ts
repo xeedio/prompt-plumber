@@ -17,6 +17,7 @@ export interface AdapterDefaults {
   system_inject: string[];
   auto_compact: boolean;
   compaction_threshold: number;
+  compaction_threshold_pct: number;
 }
 
 export interface ActivationRule {
@@ -32,6 +33,7 @@ export interface ActivationRule {
   system_inject: string[];
   auto_compact: boolean;
   compaction_threshold: number;
+  compaction_threshold_pct: number;
 }
 
 export interface AdapterConfig {
@@ -61,6 +63,7 @@ export const DEFAULT_CONFIG: AdapterConfig = {
     system_inject: [],
     auto_compact: true,
     compaction_threshold: 170000,
+    compaction_threshold_pct: 0.66,
   },
   rules: [
     {
@@ -78,6 +81,7 @@ export const DEFAULT_CONFIG: AdapterConfig = {
       ],
       auto_compact: true,
       compaction_threshold: 170000,
+      compaction_threshold_pct: 0.66,
     },
   ],
 };
@@ -113,6 +117,13 @@ function asRecoveryMaxRetries(value: unknown, fallback: number): number {
 function asCompactionThreshold(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return Math.floor(value);
+  }
+  return fallback;
+}
+
+function asCompactionThresholdPct(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1) {
+    return value;
   }
   return fallback;
 }
@@ -161,6 +172,10 @@ export function normalizeRule(rule: Partial<ActivationRule>, defaults: AdapterDe
       rule.compaction_threshold,
       defaults.compaction_threshold,
     ),
+    compaction_threshold_pct: asCompactionThresholdPct(
+      rule.compaction_threshold_pct,
+      defaults.compaction_threshold_pct,
+    ),
   };
 }
 
@@ -194,6 +209,10 @@ export function mergeConfig(base: AdapterConfig, override: PartialAdapterConfig)
     compaction_threshold: asCompactionThreshold(
       override.defaults?.compaction_threshold,
       base.defaults.compaction_threshold,
+    ),
+    compaction_threshold_pct: asCompactionThresholdPct(
+      override.defaults?.compaction_threshold_pct,
+      base.defaults.compaction_threshold_pct,
     ),
   };
 
@@ -278,6 +297,10 @@ export async function loadAdapterConfig(projectDirectory?: string): Promise<Adap
       compaction_threshold: asCompactionThreshold(
         config.defaults.compaction_threshold,
         DEFAULT_CONFIG.defaults.compaction_threshold,
+      ),
+      compaction_threshold_pct: asCompactionThresholdPct(
+        config.defaults.compaction_threshold_pct,
+        DEFAULT_CONFIG.defaults.compaction_threshold_pct,
       ),
     },
   };

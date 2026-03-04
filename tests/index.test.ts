@@ -26,6 +26,7 @@ const activeConfig: AdapterConfig = {
     system_inject: [],
     auto_compact: true,
     compaction_threshold: 170000,
+    compaction_threshold_pct: 0.66,
   },
   rules: [
     {
@@ -41,6 +42,7 @@ const activeConfig: AdapterConfig = {
       system_inject: [],
       auto_compact: true,
       compaction_threshold: 170000,
+      compaction_threshold_pct: 0.66,
     },
   ],
 };
@@ -728,5 +730,722 @@ describe("plugin hooks", () => {
     });
 
     expect(client.session.summarize).not.toHaveBeenCalled();
+  });
+
+  it("uses dynamic context from chat.params model.limit.context", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-dynamic",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-dynamic",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 660, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-dynamic" } },
+    });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not compact when tokens are below dynamic threshold", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-dynamic-below",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-dynamic-below",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 659, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-dynamic-below" } },
+    });
+
+    expect(client.session.summarize).not.toHaveBeenCalled();
+  });
+
+  it("falls back to absolute threshold when context is unknown", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-fallback",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-fallback",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 170000, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-fallback" } },
+    });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("recalculates threshold when model context changes mid-session", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-switch",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-switch",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 2000 } },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-switch",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 1200, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-switch" } },
+    });
+
+    expect(client.session.summarize).not.toHaveBeenCalled();
+  });
+
+  it("uses fallback threshold for a session with no chat.params", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-seed",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-no-chat-params",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 180000, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-no-chat-params" } },
+    });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+    expect(client.session.summarize).toHaveBeenCalledWith({
+      path: { id: "s-no-chat-params" },
+      body: { providerID: "vllm", modelID: "qwen3-coder-next" },
+    });
+  });
+
+  it("falls back when context window is zero", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-zero-context",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 0 } },
+      },
+      {},
+    );
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-zero-context",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 170000, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-zero-context" } } });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("tracks thresholds independently across sessions", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-a",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+    await hooks["chat.params"](
+      {
+        sessionID: "s-b",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 2000 } },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-a",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 700, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-b",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 700, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-a" } } });
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-b" } } });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+    expect(client.session.summarize).toHaveBeenCalledWith({
+      path: { id: "s-a" },
+      body: { providerID: "vllm", modelID: "qwen3-coder-next" },
+    });
+  });
+
+  it("clears in-flight guard on session.compacted", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-guard",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-guard",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 800, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-guard" } } });
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-guard" } } });
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+
+    await hooks["event"]({ event: { type: "session.compacted", properties: { sessionID: "s-guard" } } });
+    await hooks["chat.params"](
+      {
+        sessionID: "s-guard",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-guard",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 800, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-guard" } } });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(2);
+  });
+
+  it("supports compaction threshold pct edge values", async () => {
+    const cfg = {
+      ...activeConfig,
+      rules: [{ ...activeConfig.rules[0], compaction_threshold_pct: 0, compaction_threshold: 170000 }],
+    };
+    loadAdapterConfigMock.mockResolvedValue(cfg);
+
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-pct-0",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-pct-0" } } });
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+
+    client.session.summarize.mockClear();
+    loadAdapterConfigMock.mockResolvedValue({
+      ...activeConfig,
+      rules: [{ ...activeConfig.rules[0], compaction_threshold_pct: 1 }],
+    });
+    const hooks2 = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+    await hooks2["chat.params"](
+      {
+        sessionID: "s-pct-1",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+    await hooks2["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-pct-1",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 999, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks2["event"]({ event: { type: "session.idle", properties: { sessionID: "s-pct-1" } } });
+    expect(client.session.summarize).not.toHaveBeenCalled();
+
+    await hooks2["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-pct-1",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 1000, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks2["event"]({ event: { type: "session.idle", properties: { sessionID: "s-pct-1" } } });
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+
+    client.session.summarize.mockClear();
+    loadAdapterConfigMock.mockResolvedValue({
+      ...activeConfig,
+      rules: [{ ...activeConfig.rules[0], compaction_threshold_pct: 0.5 }],
+    });
+    const hooks3 = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+    await hooks3["chat.params"](
+      {
+        sessionID: "s-pct-half",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+    await hooks3["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-pct-half",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 500, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks3["event"]({ event: { type: "session.idle", properties: { sessionID: "s-pct-half" } } });
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles context transitions and model.context fallback", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-context-change",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", context: 1000 },
+      },
+      {},
+    );
+    await hooks["chat.params"](
+      {
+        sessionID: "s-context-change",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+    await hooks["chat.params"](
+      {
+        sessionID: "s-context-non-object",
+        provider: { info: { id: "vllm" } },
+        model: "qwen3-coder-next",
+      } as never,
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-context-change",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { total: 170000 },
+          },
+        },
+      },
+    });
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-context-change" } },
+    });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles message.part.updated and ignores malformed token events", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-step-finish",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-step-finish",
+            providerID: 12,
+            modelID: null,
+            tokens: null,
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            sessionID: "s-step-finish",
+            type: "step-finish",
+            tokens: { input: 500, output: 160 },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "s-step-finish",
+          status: { type: "running" },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "s-step-finish" },
+      },
+    });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears in-flight guard when summarize throws", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize
+      .mockRejectedValueOnce(new Error("temporary summarize failure"))
+      .mockResolvedValueOnce({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-summarize-error",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000 } },
+      },
+      {},
+    );
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-summarize-error",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 1000 },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-summarize-error" } } });
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-summarize-error" } } });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(2);
+  });
+
+  it("handles recovery message fetch failures and malformed assistant payloads", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.promptAsync.mockResolvedValue({});
+    client.session.messages
+      .mockRejectedValueOnce(new Error("message fetch failed"))
+      .mockResolvedValueOnce({ data: [{ info: { role: "assistant" } }] })
+      .mockResolvedValueOnce({ data: [{ info: { role: "assistant" }, parts: [{ type: "reasoning", text: "ok" }] }] });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-recovery-edge",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-recovery-edge" } } });
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-recovery-edge" } } });
+    await hooks["event"]({ event: { type: "session.idle", properties: { sessionID: "s-recovery-edge" } } });
+
+    expect(client.session.promptAsync).not.toHaveBeenCalled();
+    expect(client.session.messages).toHaveBeenCalledTimes(3);
   });
 });

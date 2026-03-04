@@ -31,6 +31,10 @@ type SessionTokenState = {
   total: number;
   providerID?: string;
   modelID?: string;
+  contextWindow?: number;
+  thresholdTokens: number;
+  thresholdPct: number;
+  warnedContextUnknown: boolean;
 };
 
 function asNumber(value: unknown): number | undefined {
@@ -62,9 +66,28 @@ function tokenTotal(tokens: unknown): number | undefined {
   return computed > 0 ? computed : undefined;
 }
 
-function shouldTriggerCompaction(state: SessionTokenState | undefined, threshold: number): boolean {
-  if (!state) return false;
-  return state.total >= threshold;
+function percentUsed(currentTokens: number, thresholdTokens: number): number {
+  if (thresholdTokens <= 0) return 1;
+  return Number((currentTokens / thresholdTokens).toFixed(4));
+}
+
+function extractContextWindow(model: unknown): number | undefined {
+  if (!model || typeof model !== "object") return undefined;
+  const typed = model as {
+    limit?: {
+      context?: unknown;
+    };
+    context?: unknown;
+  };
+  const byLimit = asNumber(typed.limit?.context);
+  if (byLimit !== undefined && byLimit > 0) return Math.floor(byLimit);
+  const byContext = asNumber(typed.context);
+  if (byContext !== undefined && byContext > 0) return Math.floor(byContext);
+  return undefined;
+}
+
+function thresholdFromContext(contextWindow: number, thresholdPct: number): number {
+  return Math.floor(contextWindow * thresholdPct);
 }
 
 const plugin = (async (ctx) => {
@@ -138,13 +161,19 @@ const plugin = (async (ctx) => {
               total,
               providerID: asString(info.providerID) || previous?.providerID,
               modelID: asString(info.modelID) || previous?.modelID,
+              contextWindow: previous?.contextWindow,
+              thresholdTokens: previous?.thresholdTokens ?? 0,
+              thresholdPct: previous?.thresholdPct ?? 0,
+              warnedContextUnknown: previous?.warnedContextUnknown ?? false,
             });
-            logger.debug("event", "captured assistant token usage", {
+            logger.debug("event", "token_update", {
               sessionID: info.sessionID,
               data: {
-                total,
-                providerID: asString(info.providerID),
-                modelID: asString(info.modelID),
+                currentTokens: total,
+                thresholdTokens: previous?.thresholdTokens ?? 0,
+                percentUsed: percentUsed(total, previous?.thresholdTokens ?? 0),
+                providerID: asString(info.providerID) || previous?.providerID,
+                modelID: asString(info.modelID) || previous?.modelID,
               },
             });
           }
@@ -161,10 +190,18 @@ const plugin = (async (ctx) => {
               total,
               providerID: previous?.providerID,
               modelID: previous?.modelID,
+              contextWindow: previous?.contextWindow,
+              thresholdTokens: previous?.thresholdTokens ?? 0,
+              thresholdPct: previous?.thresholdPct ?? 0,
+              warnedContextUnknown: previous?.warnedContextUnknown ?? false,
             });
-            logger.debug("event", "captured step-finish token usage", {
+            logger.debug("event", "token_update", {
               sessionID: part.sessionID,
-              data: { total },
+              data: {
+                currentTokens: total,
+                thresholdTokens: previous?.thresholdTokens ?? 0,
+                percentUsed: percentUsed(total, previous?.thresholdTokens ?? 0),
+              },
             });
           }
         }
@@ -204,33 +241,74 @@ const plugin = (async (ctx) => {
 
       if (decision.active && decision.autoCompact) {
         const tracked = tokensBySession.get(sessionID);
-        const threshold = decision.compactionThreshold;
-        if (shouldTriggerCompaction(tracked, threshold)) {
-          const providerID = tracked?.providerID || decision.provider;
-          const modelID = tracked?.modelID || decision.model;
-          if (providerID && modelID && !compactingSessions.has(sessionID)) {
-            compactingSessions.add(sessionID);
-            logger.info("event", "triggering proactive compaction", {
+        const currentTokens = tracked?.total ?? 0;
+        const thresholdTokens = tracked?.thresholdTokens ?? decision.compactionThreshold;
+        const thresholdPct = tracked?.thresholdPct ?? decision.compactionThresholdPct;
+
+        if (!tracked?.contextWindow) {
+          if (!tracked?.warnedContextUnknown) {
+            logger.warn("event", "context_unknown", {
               sessionID,
               data: {
-                totalTokens: tracked?.total,
-                threshold,
-                providerID,
-                modelID,
-                method: "session.summarize",
+                provider: tracked?.providerID || decision.provider,
+                model: tracked?.modelID || decision.model,
+                thresholdTokens,
+                thresholdPct,
               },
             });
-            try {
-              await ctx.client.session.summarize({
-                path: { id: sessionID },
-                body: { providerID, modelID },
-              });
-            } catch (error) {
-              logger.error("event", "failed proactive compaction", {
+            if (tracked) {
+              tracked.warnedContextUnknown = true;
+              tokensBySession.set(sessionID, tracked);
+            }
+          }
+        }
+
+        if (currentTokens < thresholdTokens) {
+          logger.debug("event", "compaction_not_needed", {
+            sessionID,
+            data: {
+              currentTokens,
+              thresholdTokens,
+              percentUsed: percentUsed(currentTokens, thresholdTokens),
+            },
+          });
+        } else {
+          const providerID = tracked?.providerID || decision.provider;
+          const modelID = tracked?.modelID || decision.model;
+          if (providerID && modelID) {
+            if (compactingSessions.has(sessionID)) {
+              logger.info("event", "compaction_skipped", {
                 sessionID,
-                data: { error: error instanceof Error ? error.message : String(error) },
+                data: {
+                  reason: "in_flight_guard",
+                },
               });
-              compactingSessions.delete(sessionID);
+            } else {
+              compactingSessions.add(sessionID);
+              logger.info("event", "compaction_triggered", {
+                sessionID,
+                data: {
+                  currentTokens,
+                  thresholdTokens,
+                  percentUsed: percentUsed(currentTokens, thresholdTokens),
+                  providerID,
+                  modelID,
+                  reason: "tokens_at_or_above_threshold",
+                  method: "session.summarize",
+                },
+              });
+              try {
+                await ctx.client.session.summarize({
+                  path: { id: sessionID },
+                  body: { providerID, modelID },
+                });
+              } catch (error) {
+                logger.error("event", "failed proactive compaction", {
+                  sessionID,
+                  data: { error: error instanceof Error ? error.message : String(error) },
+                });
+                compactingSessions.delete(sessionID);
+              }
             }
           }
         }
@@ -296,19 +374,92 @@ const plugin = (async (ctx) => {
         model: asString(input.model?.id),
       });
       const existing = tokensBySession.get(input.sessionID);
+      const provider = providerIdFromChatParams(input);
+      const model = asString(input.model?.id);
+      const contextWindow = extractContextWindow(input.model);
+      const thresholdPct = decision.compactionThresholdPct;
+      const thresholdTokens =
+        contextWindow !== undefined
+          ? thresholdFromContext(contextWindow, thresholdPct)
+          : decision.compactionThreshold;
+      const warnedContextUnknown = contextWindow === undefined;
+
+      const hasPreviousContext = existing?.contextWindow !== undefined;
+      if (contextWindow !== undefined && !hasPreviousContext) {
+        logger.info("chat.params", "context_discovered", {
+          sessionID: input.sessionID,
+          data: {
+            provider,
+            model,
+            contextWindow,
+            thresholdTokens,
+            thresholdPct,
+          },
+        });
+      }
+
+      if (existing?.contextWindow !== undefined && contextWindow !== undefined && existing.contextWindow !== contextWindow) {
+        logger.info("chat.params", "context_changed", {
+          sessionID: input.sessionID,
+          data: {
+            provider,
+            model,
+            oldContextWindow: existing.contextWindow,
+            newContextWindow: contextWindow,
+            oldThresholdTokens: existing.thresholdTokens,
+            newThresholdTokens: thresholdTokens,
+            thresholdPct,
+          },
+        });
+      }
+
+      if (existing?.contextWindow !== undefined && contextWindow === undefined) {
+        logger.info("chat.params", "context_changed", {
+          sessionID: input.sessionID,
+          data: {
+            provider,
+            model,
+            oldContextWindow: existing.contextWindow,
+            newContextWindow: undefined,
+            oldThresholdTokens: existing.thresholdTokens,
+            newThresholdTokens: thresholdTokens,
+            thresholdPct,
+          },
+        });
+      }
+
+      if (contextWindow === undefined) {
+        logger.warn("chat.params", "context_unknown", {
+          sessionID: input.sessionID,
+          data: {
+            provider,
+            model,
+            thresholdTokens,
+            thresholdPct,
+          },
+        });
+      }
+
       tokensBySession.set(input.sessionID, {
         total: existing?.total ?? 0,
-        providerID: providerIdFromChatParams(input),
-        modelID: asString(input.model?.id),
+        providerID: provider,
+        modelID: model,
+        contextWindow,
+        thresholdTokens,
+        thresholdPct,
+        warnedContextUnknown,
       });
       logger.debug("chat.params", "hook fired", {
         sessionID: input.sessionID,
         data: {
-          provider: providerIdFromChatParams(input),
-          model: asString(input.model?.id),
+          provider,
+          model,
           active: decision.active,
           autoCompact: decision.autoCompact,
-          compactionThreshold: decision.compactionThreshold,
+          thresholdTokens,
+          thresholdPct,
+          contextWindow,
+          usedFallbackThreshold: contextWindow === undefined,
           matchedRule: decision.matchedRule,
         },
       });

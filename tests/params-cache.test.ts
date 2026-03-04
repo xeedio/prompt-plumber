@@ -15,6 +15,7 @@ const baseConfig: AdapterConfig = {
     system_inject: [],
     auto_compact: true,
     compaction_threshold: 170000,
+    compaction_threshold_pct: 0.66,
   },
   rules: [
     {
@@ -30,6 +31,7 @@ const baseConfig: AdapterConfig = {
       system_inject: ["close thinking before tool output"],
       auto_compact: true,
       compaction_threshold: 170000,
+      compaction_threshold_pct: 0.66,
     },
     {
       name: "wildcard",
@@ -44,6 +46,7 @@ const baseConfig: AdapterConfig = {
       system_inject: ["use tool output outside think tags"],
       auto_compact: false,
       compaction_threshold: 120000,
+      compaction_threshold_pct: 0.5,
     },
   ],
 };
@@ -65,6 +68,7 @@ describe("ParamsCache", () => {
     expect(decision.systemInject).toEqual(["close thinking before tool output"]);
     expect(decision.autoCompact).toBe(true);
     expect(decision.compactionThreshold).toBe(170000);
+    expect(decision.compactionThresholdPct).toBe(0.66);
   });
 
   it("skips anthropic providers entirely", () => {
@@ -92,6 +96,50 @@ describe("ParamsCache", () => {
     expect(decision.stripHistoryThinking).toBe(false);
   });
 
+  it("matches rules with wildcard star provider and empty model_patterns", () => {
+    const cache = new ParamsCache({
+      ...baseConfig,
+      rules: [
+        {
+          ...baseConfig.rules[0],
+          name: "star-provider",
+          providers: ["*"],
+          model_patterns: [],
+        },
+      ],
+    });
+
+    const decision = cache.rememberFromChatParams({
+      sessionID: "s-star",
+      provider: "custom-provider",
+      model: "any-model",
+    });
+
+    expect(decision.active).toBe(true);
+    expect(decision.matchedRule).toBe("star-provider");
+  });
+
+  it("ignores empty provider candidates and falls back to no match", () => {
+    const cache = new ParamsCache({
+      ...baseConfig,
+      rules: [
+        {
+          ...baseConfig.rules[0],
+          name: "empty-provider",
+          providers: ["   "],
+        },
+      ],
+    });
+
+    const decision = cache.rememberFromChatParams({
+      sessionID: "s-empty-provider",
+      provider: "vllm",
+      model: "qwen3-coder-next",
+    });
+
+    expect(decision.active).toBe(false);
+  });
+
   it("passes through rule system_inject into activation decision", () => {
     const cache = new ParamsCache(baseConfig);
     const decision = cache.rememberFromChatParams({
@@ -105,6 +153,7 @@ describe("ParamsCache", () => {
     expect(decision.recoveryMaxRetries).toBe(2);
     expect(decision.autoCompact).toBe(false);
     expect(decision.compactionThreshold).toBe(120000);
+    expect(decision.compactionThresholdPct).toBe(0.5);
   });
 
   it("returns cached decision by session id", () => {
@@ -146,6 +195,7 @@ describe("ParamsCache", () => {
       systemInject: [],
       autoCompact: false,
       compactionThreshold: 0,
+      compactionThresholdPct: 0,
     });
     expect(decision.matchedRule).toBeUndefined();
   });
@@ -183,6 +233,7 @@ describe("ParamsCache", () => {
           system_inject: [],
           auto_compact: true,
           compaction_threshold: 170000,
+          compaction_threshold_pct: 0.66,
         },
       ],
     });
@@ -222,6 +273,7 @@ describe("ParamsCache", () => {
       systemInject: [],
       autoCompact: false,
       compactionThreshold: 0,
+      compactionThresholdPct: 0,
     });
   });
 });
