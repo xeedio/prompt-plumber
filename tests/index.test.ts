@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdapterConfig } from "../src/config.js";
@@ -58,13 +62,19 @@ function createMockClient() {
 }
 
 describe("plugin hooks", () => {
-  beforeEach(() => {
+  let testLogDir = "";
+
+  beforeEach(async () => {
     loadAdapterConfigMock.mockReset();
+    testLogDir = await mkdtemp(path.join(os.tmpdir(), "pp-test-"));
+    process.env.PROMPT_PLUMBER_LOG_DIR = testLogDir;
     process.env.PROMPT_PLUMBER_LOG_LEVEL = "error";
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     delete process.env.PROMPT_PLUMBER_LOG_LEVEL;
+    delete process.env.PROMPT_PLUMBER_LOG_DIR;
+    await rm(testLogDir, { recursive: true, force: true }).catch(() => {});
   });
 
   it("returns no hooks when adapter config is disabled", async () => {
