@@ -257,18 +257,39 @@ async function loadJsonc(filePath: string): Promise<PartialAdapterConfig | null>
   return parsed ?? null;
 }
 
+async function loadJsoncWithLegacyFallback(
+  primaryPath: string,
+  legacyPath: string,
+): Promise<PartialAdapterConfig | null> {
+  const primary = await loadJsonc(primaryPath);
+  if (primary) {
+    return primary;
+  }
+
+  const legacy = await loadJsonc(legacyPath);
+  if (legacy) {
+    console.warn(
+      `prompt-plumber: using legacy config path ${legacyPath}; migrate to ${primaryPath}`,
+    );
+  }
+
+  return legacy;
+}
+
 export async function loadAdapterConfig(projectDirectory?: string): Promise<AdapterConfig> {
   let config = DEFAULT_CONFIG;
 
-  const globalConfigPath = path.join(homedir(), ".config", "opencode", "vllm-adapter.jsonc");
-  const globalConfig = await loadJsonc(globalConfigPath);
+  const globalConfigPath = path.join(homedir(), ".config", "opencode", "prompt-plumber.jsonc");
+  const globalLegacyConfigPath = path.join(homedir(), ".config", "opencode", "vllm-adapter.jsonc");
+  const globalConfig = await loadJsoncWithLegacyFallback(globalConfigPath, globalLegacyConfigPath);
   if (globalConfig) {
     config = mergeConfig(config, globalConfig);
   }
 
   if (projectDirectory) {
-    const projectConfigPath = path.join(projectDirectory, ".opencode", "vllm-adapter.jsonc");
-    const projectConfig = await loadJsonc(projectConfigPath);
+    const projectConfigPath = path.join(projectDirectory, ".opencode", "prompt-plumber.jsonc");
+    const projectLegacyConfigPath = path.join(projectDirectory, ".opencode", "vllm-adapter.jsonc");
+    const projectConfig = await loadJsoncWithLegacyFallback(projectConfigPath, projectLegacyConfigPath);
     if (projectConfig) {
       config = mergeConfig(config, projectConfig);
     }

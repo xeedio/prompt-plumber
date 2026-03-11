@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_CONFIG,
@@ -249,7 +249,7 @@ describe("loadAdapterConfig", () => {
       const globalDir = path.join(homeDir, ".config", "opencode");
       await mkdir(globalDir, { recursive: true });
       await writeFile(
-        path.join(globalDir, "vllm-adapter.jsonc"),
+        path.join(globalDir, "prompt-plumber.jsonc"),
         `{
           "enabled": false
         }`,
@@ -267,7 +267,7 @@ describe("loadAdapterConfig", () => {
       const globalDir = path.join(homeDir, ".config", "opencode");
       await mkdir(globalDir, { recursive: true });
       await writeFile(
-        path.join(globalDir, "vllm-adapter.jsonc"),
+        path.join(globalDir, "prompt-plumber.jsonc"),
         `{
           "defaults": {
             "strip_history_thinking": false,
@@ -286,7 +286,7 @@ describe("loadAdapterConfig", () => {
       const projectConfigDir = path.join(projectDir, ".opencode");
       await mkdir(projectConfigDir, { recursive: true });
       await writeFile(
-        path.join(projectConfigDir, "vllm-adapter.jsonc"),
+        path.join(projectConfigDir, "prompt-plumber.jsonc"),
         `{
           "enabled": false,
           "defaults": {
@@ -330,11 +330,38 @@ describe("loadAdapterConfig", () => {
     });
   });
 
+  it("falls back to legacy global config path and warns for migration", async () => {
+    await withTempHome(async ({ homeDir }) => {
+      const globalDir = path.join(homeDir, ".config", "opencode");
+      await mkdir(globalDir, { recursive: true });
+      await writeFile(
+        path.join(globalDir, "vllm-adapter.jsonc"),
+        `{
+          "enabled": false
+        }`,
+      );
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const loaded = await loadAdapterConfig();
+        expect(loaded.enabled).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("using legacy config path"),
+        );
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("prompt-plumber.jsonc"),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+  });
+
   it("throws a parse error when config JSONC is invalid", async () => {
     await withTempHome(async ({ homeDir, projectDir }) => {
       const globalDir = path.join(homeDir, ".config", "opencode");
       await mkdir(globalDir, { recursive: true });
-      const brokenPath = path.join(globalDir, "vllm-adapter.jsonc");
+      const brokenPath = path.join(globalDir, "prompt-plumber.jsonc");
       await writeFile(brokenPath, "{\n  defaults: {\n");
 
       await expect(loadAdapterConfig(projectDir)).rejects.toThrow(
