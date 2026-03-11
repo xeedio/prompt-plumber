@@ -1,4 +1,5 @@
 const TOOL_CALL_PATTERN = /<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/i;
+const FUNCTION_CALL_PATTERN = /<function=\w+\b[^>]*>/i;
 
 export interface RecoveryTracker {
   attempts: Map<string, number>;
@@ -20,7 +21,7 @@ export function hasTrappedToolCall(
     return (
       (type === "reasoning" || type === "thinking") &&
       typeof part.text === "string" &&
-      TOOL_CALL_PATTERN.test(part.text)
+      (TOOL_CALL_PATTERN.test(part.text) || FUNCTION_CALL_PATTERN.test(part.text))
     );
   });
 

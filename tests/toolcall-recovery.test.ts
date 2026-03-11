@@ -24,6 +24,39 @@ describe("toolcall recovery helpers", () => {
     expect(trapped).toBe(true);
   });
 
+  it("detects trapped function= XML in reasoning parts", () => {
+    const trapped = hasTrappedToolCall([
+      {
+        type: "reasoning",
+        text: "plan <function=read><parameter=filePath>/foo</parameter></function> continue",
+      },
+    ]);
+
+    expect(trapped).toBe(true);
+  });
+
+  it("detects unclosed function= XML in reasoning parts", () => {
+    const trapped = hasTrappedToolCall([
+      {
+        type: "reasoning",
+        text: "plan <function=read><parameter=filePath>/foo</parameter> continue",
+      },
+    ]);
+
+    expect(trapped).toBe(true);
+  });
+
+  it("detects function= in thinking parts", () => {
+    const trapped = hasTrappedToolCall([
+      {
+        type: "thinking",
+        text: "<function=Glob><parameter=pattern>*.ts</parameter></function>",
+      },
+    ]);
+
+    expect(trapped).toBe(true);
+  });
+
   it("returns false when no reasoning part contains tool_call XML", () => {
     const trapped = hasTrappedToolCall([
       {
@@ -51,6 +84,31 @@ describe("toolcall recovery helpers", () => {
     ]);
 
     expect(trapped).toBe(false);
+  });
+
+  it("returns false for function= when real tool part exists", () => {
+    const trapped = hasTrappedToolCall([
+      {
+        type: "reasoning",
+        text: "<function=read>...</function>",
+      },
+      {
+        type: "tool",
+      },
+    ]);
+
+    expect(trapped).toBe(false);
+  });
+
+  it("detects mixed tool_call and function= patterns", () => {
+    const trapped = hasTrappedToolCall([
+      {
+        type: "reasoning",
+        text: "<tool_call><name>bash</name></tool_call><function=read><parameter=filePath>/foo</parameter></function>",
+      },
+    ]);
+
+    expect(trapped).toBe(true);
   });
 
   it("handles parts with non-string type values safely", () => {
