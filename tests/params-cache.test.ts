@@ -276,4 +276,35 @@ describe("ParamsCache", () => {
       compactionThresholdPct: 0,
     });
   });
+
+  it("replaces config and applies updated rules to new evaluations", () => {
+    const cache = new ParamsCache(baseConfig);
+    cache.rememberFromChatParams({
+      sessionID: "s-update",
+      provider: "vllm",
+      model: "qwen3-coder-next",
+    });
+
+    cache.updateConfig({
+      ...baseConfig,
+      rules: [
+        {
+          ...baseConfig.rules[0],
+          name: "litellm-only",
+          providers: ["litellm"],
+          model_patterns: ["coder"],
+        },
+      ],
+    });
+
+    expect(cache.resolve({ sessionID: "s-update" }).active).toBe(true);
+
+    const updatedDecision = cache.rememberFromChatParams({
+      sessionID: "s-update",
+      provider: "litellm",
+      model: "coder",
+    });
+    expect(updatedDecision.active).toBe(true);
+    expect(updatedDecision.matchedRule).toBe("litellm-only");
+  });
 });

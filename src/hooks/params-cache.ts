@@ -117,7 +117,11 @@ export class ParamsCache {
 
   private lastDecision: ActivationDecision | null = null;
 
-  constructor(private readonly config: AdapterConfig) {}
+  constructor(private config: AdapterConfig) {}
+
+  updateConfig(config: AdapterConfig): void {
+    this.config = config;
+  }
 
   private evaluate(providerInput: unknown, modelInput: unknown): ActivationDecision {
     const provider = normalizeValue(providerInput);

@@ -123,7 +123,7 @@ const plugin = (async (ctx) => {
   });
 
   const cache = new ParamsCache(config);
-  const tracker = createRecoveryTracker(3);
+  const tracker = createRecoveryTracker(config.defaults.recovery_max_retries);
   const tokensBySession = new Map<string, SessionTokenState>();
   const compactingSessions = new Set<string>();
 
@@ -318,14 +318,11 @@ const plugin = (async (ctx) => {
         return;
       }
 
-      const sessionTracker = {
-        attempts: tracker.attempts,
-        maxRetries: decision.recoveryMaxRetries,
-      };
-      if (!canRetry(sessionTracker, sessionID)) {
+      tracker.maxRetries = decision.recoveryMaxRetries;
+      if (!canRetry(tracker, sessionID)) {
         logger.debug("event", "recovery skipped due to retry limit", {
           sessionID,
-          data: { maxRetries: sessionTracker.maxRetries },
+          data: { maxRetries: tracker.maxRetries },
         });
         return;
       }
@@ -348,10 +345,10 @@ const plugin = (async (ctx) => {
           return;
         }
 
-        recordAttempt(sessionTracker, sessionID);
+        recordAttempt(tracker, sessionID);
         logger.info("event", "tool-call recovery triggered", {
           sessionID,
-          data: { attempts: sessionTracker.attempts.get(sessionID) },
+          data: { attempts: tracker.attempts.get(sessionID) },
         });
         await ctx.client.session.promptAsync({
           path: { id: sessionID },
@@ -368,11 +365,16 @@ const plugin = (async (ctx) => {
     },
 
     "chat.params": async (input, _output) => {
+      const freshConfig = await loadAdapterConfig(ctx.directory);
+      cache.updateConfig(freshConfig);
+      logger.debug("chat.params", "config_reloaded");
+
       const decision = cache.rememberFromChatParams({
         sessionID: input.sessionID,
         provider: providerIdFromChatParams(input),
         model: asString(input.model?.id),
       });
+      tracker.maxRetries = decision.recoveryMaxRetries;
       const existing = tokensBySession.get(input.sessionID);
       const provider = providerIdFromChatParams(input);
       const model = asString(input.model?.id);

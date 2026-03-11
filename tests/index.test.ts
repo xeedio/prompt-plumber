@@ -804,6 +804,102 @@ describe("plugin hooks", () => {
     expect(client.session.summarize).not.toHaveBeenCalled();
   });
 
+  it("hot-reloads config on chat.params and applies updated decisions", async () => {
+    const noCompactConfig: AdapterConfig = {
+      ...activeConfig,
+      rules: [
+        {
+          ...activeConfig.rules[0],
+          auto_compact: false,
+        },
+      ],
+    };
+
+    loadAdapterConfigMock
+      .mockResolvedValueOnce(activeConfig)
+      .mockResolvedValueOnce(activeConfig)
+      .mockResolvedValueOnce(noCompactConfig);
+
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-hot-reload",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-hot-reload",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 170000, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks["event"]({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "s-hot-reload" },
+      },
+    });
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+
+    await hooks["event"]({
+      event: {
+        type: "session.compacted",
+        properties: { sessionID: "s-hot-reload" },
+      },
+    });
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-hot-reload",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-hot-reload",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 200000, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks["event"]({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "s-hot-reload" },
+      },
+    });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+    expect(loadAdapterConfigMock).toHaveBeenCalledTimes(3);
+  });
+
   it("uses dynamic context from chat.params model.limit.context", async () => {
     loadAdapterConfigMock.mockResolvedValue(activeConfig);
     const client = createMockClient();
