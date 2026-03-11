@@ -18,9 +18,9 @@ function asString(value: unknown): string {
 }
 
 function providerIdFromChatParams(input: {
-  provider?: { info?: { id?: string } };
+  provider?: { info?: { id?: string }; id?: string };
 }): string {
-  return asString(input.provider?.info?.id);
+  return asString(input.provider?.info?.id) || asString(input.provider?.id);
 }
 
 function providerIdFromModel(input: { model?: { providerID?: string; providerId?: string } }): string {

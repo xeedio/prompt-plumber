@@ -152,6 +152,68 @@ describe("plugin hooks", () => {
     expect(undefinedSessionOutput.headers).toEqual({});
   });
 
+  it("extracts provider from provider.id in chat.params", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project" } as never)) as Record<
+      string,
+      (input: any, output: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-provider-id",
+        provider: { id: "vllm" },
+        model: { id: "qwen3-coder-next" },
+      },
+      {},
+    );
+
+    const systemOutput = { system: ["left", "right"] };
+    await hooks["experimental.chat.system.transform"](
+      {
+        sessionID: "s-provider-id",
+        model: { id: "qwen3-coder-next" },
+      },
+      systemOutput,
+    );
+
+    expect(systemOutput.system).toEqual(["left\n\nright"]);
+  });
+
+  it("matches litellm rules when chat.params provider uses provider.id", async () => {
+    loadAdapterConfigMock.mockResolvedValue({
+      ...activeConfig,
+      rules: [
+        {
+          ...activeConfig.rules[0],
+          name: "litellm-coder",
+          providers: ["litellm"],
+          model_patterns: ["coder"],
+        },
+      ],
+    });
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project" } as never)) as Record<
+      string,
+      (input: any, output: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-litellm-provider-id",
+        provider: { id: "litellm" },
+        model: { id: "coder" },
+      },
+      {},
+    );
+
+    const textOutput = { text: "head <think>private</think> tail" };
+    await hooks["experimental.text.complete"]({ sessionID: "s-litellm-provider-id" }, textOutput);
+
+    expect(textOutput.text).toBe("head  tail");
+  });
+
   it("triggers recovery prompt on session.idle when assistant has trapped tool_call XML", async () => {
     loadAdapterConfigMock.mockResolvedValue(activeConfig);
     const client = createMockClient();
