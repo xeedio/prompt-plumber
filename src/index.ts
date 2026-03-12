@@ -75,10 +75,13 @@ function extractContextWindow(model: unknown): number | undefined {
   if (!model || typeof model !== "object") return undefined;
   const typed = model as {
     limit?: {
+      input?: unknown;
       context?: unknown;
     };
     context?: unknown;
   };
+  const byInput = asNumber(typed.limit?.input);
+  if (byInput !== undefined && byInput > 0) return Math.floor(byInput);
   const byLimit = asNumber(typed.limit?.context);
   if (byLimit !== undefined && byLimit > 0) return Math.floor(byLimit);
   const byContext = asNumber(typed.context);

@@ -943,6 +943,53 @@ describe("plugin hooks", () => {
     expect(client.session.summarize).toHaveBeenCalledTimes(1);
   });
 
+  it("prefers model.limit.input over model.limit.context for threshold", async () => {
+    loadAdapterConfigMock.mockResolvedValue(activeConfig);
+    const client = createMockClient();
+    client.session.messages.mockResolvedValue({ data: [] });
+    client.session.summarize.mockResolvedValue({ data: true });
+
+    const pluginFactory = (await import("../src/index.js")).default;
+    const hooks = (await pluginFactory({ directory: "/tmp/project", client } as never)) as Record<
+      string,
+      (input: any, output?: any) => Promise<void>
+    >;
+
+    await hooks["chat.params"](
+      {
+        sessionID: "s-input-limit",
+        provider: { info: { id: "vllm" } },
+        model: { id: "qwen3-coder-next", limit: { context: 1000, input: 500 } },
+      },
+      {},
+    );
+
+    await hooks["event"]({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s-input-limit",
+            providerID: "vllm",
+            modelID: "qwen3-coder-next",
+            tokens: { input: 400, output: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      },
+    });
+
+    await hooks["event"]({
+      event: { type: "session.idle", properties: { sessionID: "s-input-limit" } },
+    });
+
+    expect(client.session.summarize).toHaveBeenCalledTimes(1);
+    expect(client.session.summarize).toHaveBeenCalledWith({
+      path: { id: "s-input-limit" },
+      body: { providerID: "vllm", modelID: "qwen3-coder-next" },
+    });
+  });
+
   it("does not compact when tokens are below dynamic threshold", async () => {
     loadAdapterConfigMock.mockResolvedValue(activeConfig);
     const client = createMockClient();
