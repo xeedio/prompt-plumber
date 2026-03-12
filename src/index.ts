@@ -90,6 +90,36 @@ function thresholdFromContext(contextWindow: number, thresholdPct: number): numb
   return Math.floor(contextWindow * thresholdPct);
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+}
+
+function compactionTokenCount(properties: unknown, kind: "before" | "after"): number | undefined {
+  const props = asRecord(properties);
+  if (!props) return undefined;
+
+  const directKeys =
+    kind === "before"
+      ? ["beforeTokens", "tokensBefore", "preTokens", "preTokenCount"]
+      : ["afterTokens", "tokensAfter", "postTokens", "postTokenCount"];
+
+  for (const key of directKeys) {
+    const value = asNumber(props[key]);
+    if (value !== undefined) return value;
+  }
+
+  const tokens = asRecord(props.tokens);
+  if (tokens) {
+    const nestedKeys = kind === "before" ? ["before", "pre"] : ["after", "post"];
+    for (const key of nestedKeys) {
+      const value = asNumber(tokens[key]);
+      if (value !== undefined) return value;
+    }
+  }
+
+  return undefined;
+}
+
 const plugin = (async (ctx) => {
   const config = await loadAdapterConfig(ctx.directory);
   const logger = createHookLogger({
@@ -157,12 +187,14 @@ const plugin = (async (ctx) => {
           const total = tokenTotal(info.tokens);
           if (total !== undefined) {
             const previous = tokensBySession.get(info.sessionID);
+            const thresholdTokens = previous?.thresholdTokens ?? 0;
+            const used = percentUsed(total, thresholdTokens);
             tokensBySession.set(info.sessionID, {
               total,
               providerID: asString(info.providerID) || previous?.providerID,
               modelID: asString(info.modelID) || previous?.modelID,
               contextWindow: previous?.contextWindow,
-              thresholdTokens: previous?.thresholdTokens ?? 0,
+              thresholdTokens,
               thresholdPct: previous?.thresholdPct ?? 0,
               warnedContextUnknown: previous?.warnedContextUnknown ?? false,
             });
@@ -170,12 +202,24 @@ const plugin = (async (ctx) => {
               sessionID: info.sessionID,
               data: {
                 currentTokens: total,
-                thresholdTokens: previous?.thresholdTokens ?? 0,
-                percentUsed: percentUsed(total, previous?.thresholdTokens ?? 0),
+                thresholdTokens,
+                percentUsed: used,
                 providerID: asString(info.providerID) || previous?.providerID,
                 modelID: asString(info.modelID) || previous?.modelID,
               },
             });
+            if (thresholdTokens > 0 && total > thresholdTokens) {
+              logger.warn("event", "threshold_approaching", {
+                sessionID: info.sessionID,
+                data: {
+                  currentTokens: total,
+                  thresholdTokens,
+                  percentUsed: used,
+                  providerID: asString(info.providerID) || previous?.providerID,
+                  modelID: asString(info.modelID) || previous?.modelID,
+                },
+              });
+            }
           }
         }
       }
@@ -186,12 +230,14 @@ const plugin = (async (ctx) => {
           const total = tokenTotal(part.tokens);
           if (total !== undefined) {
             const previous = tokensBySession.get(part.sessionID);
+            const thresholdTokens = previous?.thresholdTokens ?? 0;
+            const used = percentUsed(total, thresholdTokens);
             tokensBySession.set(part.sessionID, {
               total,
               providerID: previous?.providerID,
               modelID: previous?.modelID,
               contextWindow: previous?.contextWindow,
-              thresholdTokens: previous?.thresholdTokens ?? 0,
+              thresholdTokens,
               thresholdPct: previous?.thresholdPct ?? 0,
               warnedContextUnknown: previous?.warnedContextUnknown ?? false,
             });
@@ -199,15 +245,40 @@ const plugin = (async (ctx) => {
               sessionID: part.sessionID,
               data: {
                 currentTokens: total,
-                thresholdTokens: previous?.thresholdTokens ?? 0,
-                percentUsed: percentUsed(total, previous?.thresholdTokens ?? 0),
+                thresholdTokens,
+                percentUsed: used,
               },
             });
+            if (thresholdTokens > 0 && total > thresholdTokens) {
+              logger.warn("event", "threshold_approaching", {
+                sessionID: part.sessionID,
+                data: {
+                  currentTokens: total,
+                  thresholdTokens,
+                  percentUsed: used,
+                  providerID: previous?.providerID,
+                  modelID: previous?.modelID,
+                },
+              });
+            }
           }
         }
       }
 
       if (event.type === "session.compacted" && event.properties?.sessionID) {
+        const beforeTokens = compactionTokenCount(event.properties, "before");
+        const afterTokens = compactionTokenCount(event.properties, "after");
+        const tracked = tokensBySession.get(event.properties.sessionID);
+        logger.info("event", "session_compacted", {
+          sessionID: event.properties.sessionID,
+          data: {
+            properties: event.properties,
+            beforeTokens,
+            afterTokens,
+            trackedTokensBeforeClear: tracked?.total,
+            trackedThresholdTokens: tracked?.thresholdTokens,
+          },
+        });
         compactingSessions.delete(event.properties.sessionID);
         tokensBySession.delete(event.properties.sessionID);
       }
@@ -364,6 +435,23 @@ const plugin = (async (ctx) => {
       }
     },
 
+    "experimental.session.compacting": async (input) => {
+      const typed = input as { sessionID?: string };
+      if (!typed.sessionID) {
+        logger.info("experimental.session.compacting", "session_compacting", {
+          data: {
+            sessionID: undefined,
+          },
+        });
+        return;
+      }
+
+      compactingSessions.add(typed.sessionID);
+      logger.info("experimental.session.compacting", "session_compacting", {
+        sessionID: typed.sessionID,
+      });
+    },
+
     "chat.params": async (input, _output) => {
       const freshConfig = await loadAdapterConfig(ctx.directory);
       cache.updateConfig(freshConfig);
@@ -450,6 +538,19 @@ const plugin = (async (ctx) => {
         thresholdTokens,
         thresholdPct,
         warnedContextUnknown,
+      });
+      logger.info("chat.params", "threshold_status", {
+        sessionID: input.sessionID,
+        data: {
+          provider,
+          model,
+          currentTokens: existing?.total ?? 0,
+          thresholdTokens,
+          thresholdPct,
+          percentUsed: percentUsed(existing?.total ?? 0, thresholdTokens),
+          contextWindow,
+          usedFallbackThreshold: contextWindow === undefined,
+        },
       });
       logger.debug("chat.params", "hook fired", {
         sessionID: input.sessionID,
