@@ -1,6 +1,6 @@
 {
   "name": "@xeedio/prompt-plumber",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "OpenCode plugin to adapt vLLM/Qwen3 message handling.",
   "type": "module",
   "main": "./dist/index.js",
