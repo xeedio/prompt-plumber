@@ -23,7 +23,6 @@
   ],
   "author": "",
   "dependencies": {
-    "@xeedio/prompt-plumber": "^0.1.0",
     "jsonc-parser": "^3.3.1"
   },
   "peerDependencies": {
